@@ -1,0 +1,173 @@
+// Reglas de Firestore para ON Delivery
+// IMPORTANTE: Copia y pega estas reglas en Firebase Console > Firestore > Reglas
+// Luego haz clic en "Publicar"
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Función para verificar si el usuario está autenticado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Función para verificar si es admin - verifica el documento del usuario
+    function isAdmin() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Función para verificar si es el dueño del documento
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Función para verificar si el usuario es dueño de un restaurante
+    function isRestaurantOwner() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/restaurants/$(resource.id)) &&
+        resource.data.userId == request.auth.uid;
+    }
+    
+    // Función para verificar si el usuario es dueño de un driver
+    function isDriverOwner() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/drivers/$(resource.id)) &&
+        resource.data.userId == request.auth.uid;
+    }
+    
+    // ==========================================
+    // COLECCIÓN: users
+    // Los usuarios se crean durante el registro
+    // Admin puede actualizar cualquier usuario
+    // El propio usuario puede leer y actualizar su perfil
+    // ==========================================
+    match /users/{userId} {
+      // Crear: cualquier usuario autenticado puede crear su propio documento
+      allow create: if isAuthenticated();
+      
+      // Leer: cualquier usuario autenticado puede leer
+      allow read: if isAuthenticated();
+      
+      // Actualizar: el propio usuario o un admin
+      allow update: if isOwner(userId) || isAdmin();
+      
+      // Eliminar: solo admin
+      allow delete: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: restaurants
+    // Los restaurantes se crean durante el registro
+    // Admin puede activar/desactivar y editar
+    // El restaurante dueño puede editar sus propios datos
+    // ==========================================
+    match /restaurants/{restaurantId} {
+      // Crear: cualquier usuario autenticado puede crear
+      allow create: if isAuthenticated();
+      
+      // Leer: cualquier usuario autenticado puede leer
+      allow read: if isAuthenticated();
+      
+      // Actualizar: el dueño (por userId) o un admin
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      
+      // Eliminar: solo admin
+      allow delete: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: drivers
+    // Los repartidores se crean durante el registro
+    // Admin puede activar/desactivar y editar
+    // El repartidor dueño puede editar sus propios datos
+    // ==========================================
+    match /drivers/{driverId} {
+      // Crear: cualquier usuario autenticado puede crear
+      allow create: if isAuthenticated();
+      
+      // Leer: cualquier usuario autenticado puede leer
+      allow read: if isAuthenticated();
+      
+      // Actualizar: el dueño (por userId) o un admin
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      
+      // Eliminar: solo admin
+      allow delete: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: zones
+    // Solo admin puede gestionar zonas
+    // Lectura pública para mostrar en landing page
+    // ==========================================
+    match /zones/{zoneId} {
+      allow read: if true;  // Público para landing page
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: services
+    // Restaurantes crean servicios
+    // Repartidores aceptan y completan servicios
+    // Admin puede gestionar todo
+    // ==========================================
+    match /services/{serviceId} {
+      // Crear: cualquier usuario autenticado (restaurante)
+      allow create: if isAuthenticated();
+      
+      // Leer: cualquier usuario autenticado
+      allow read: if isAuthenticated();
+      
+      // Actualizar: el restaurante dueño, el repartidor asignado, o admin
+      allow update: if isAuthenticated();
+      
+      // Eliminar: solo admin
+      allow delete: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: settlements
+    // Solo admin puede gestionar liquidaciones
+    // ==========================================
+    match /settlements/{settlementId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: zones
+    // Zonas de cobertura - lectura pública para landing page
+    // Solo admin puede gestionar zonas
+    // ==========================================
+    match /zones/{zoneId} {
+      allow read: if true;  // Público para landing page
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: settings
+    // Configuración de la app
+    // ==========================================
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    
+    // ==========================================
+    // COLECCIÓN: userTokens
+    // Tokens FCM para notificaciones push
+    // Solo el propio usuario puede gestionar su token
+    // ==========================================
+    match /userTokens/{userId} {
+      allow create, update: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if isAuthenticated();
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}
