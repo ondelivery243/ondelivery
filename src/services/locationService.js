@@ -1,12 +1,8 @@
 // src/services/locationService.js
 // Servicio de rastreo GPS en tiempo real para repartidores
-import { getDatabase, ref, set, onValue, off, remove, update, push, serverTimestamp } from 'firebase/database'
-import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore'
-import { app } from '../config/firebase'
-
-// Instancias de bases de datos
-const db = getFirestore(app)
-const rtdb = getDatabase(app)
+import { ref, set, onValue, off, remove, update, push, serverTimestamp } from 'firebase/database'
+import { doc, updateDoc, getDoc } from 'firebase/firestore'
+import { db, rtdb } from '../config/firebase'
 
 // Colecciones en Realtime Database
 const DRIVERS_LOCATIONS = 'drivers_locations'

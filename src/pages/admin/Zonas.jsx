@@ -10,12 +10,6 @@ import {
   Chip,
   Stack,
   TextField,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -34,7 +28,6 @@ import {
   LocationOn as LocationIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  AttachMoney as MoneyIcon,
   Search as SearchIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
@@ -78,6 +71,15 @@ export default function AdminZonas() {
   const filteredZones = zones.filter(zone => 
     zone.name?.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  // Calcular tarifas min/max de forma segura
+  const activeZones = zones.filter(z => z.active && z.price)
+  const minPrice = activeZones.length > 0 
+    ? Math.min(...activeZones.map(z => z.price)) 
+    : 0
+  const maxPrice = activeZones.length > 0 
+    ? Math.max(...activeZones.map(z => z.price)) 
+    : 0
 
   // Abrir diálogo de edición
   const handleOpenEdit = (zone = null) => {
@@ -203,7 +205,7 @@ export default function AdminZonas() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="primary">
-                {formatCurrency(Math.min(...zones.filter(z => z.active).map(z => z.price || 0)) || 0)}
+                {formatCurrency(minPrice)}
               </Typography>
               <Typography variant="body2" color="text.secondary">Tarifa Mínima</Typography>
             </CardContent>
@@ -213,7 +215,7 @@ export default function AdminZonas() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="primary">
-                {formatCurrency(Math.max(...zones.filter(z => z.active).map(z => z.price || 0)) || 0)}
+                {formatCurrency(maxPrice)}
               </Typography>
               <Typography variant="body2" color="text.secondary">Tarifa Máxima</Typography>
             </CardContent>
