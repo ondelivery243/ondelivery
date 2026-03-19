@@ -16,7 +16,6 @@ import {
   useTheme,
   useMediaQuery,
   alpha,
-  Tooltip,
   Badge
 } from '@mui/material'
 import {
@@ -44,15 +43,6 @@ import {
 
 /**
  * ChatWindow - Componente de chat en tiempo real
- * 
- * @param {object} service - Datos del servicio
- * @param {object} currentUser - Usuario actual { id, name, role }
- * @param {object} otherParty - Datos de la otra parte { name, role }
- * @param {boolean} open - Si el chat está abierto
- * @param {function} onClose - Callback para cerrar
- * @param {boolean} miniMode - Modo mini (esquina inferior)
- * @param {boolean} expanded - Si está expandido en modo mini
- * @param {function} onToggleExpand - Callback para expandir/colapsar
  */
 export default function ChatWindow({
   service,
@@ -73,40 +63,56 @@ export default function ChatWindow({
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [chatRoom, setChatRoom] = useState(null)
-  const [isTyping, setIsTyping] = useState(false)
   
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const messagesContainerRef = useRef(null)
+  const isSubscribedRef = useRef(false)
+  const isInitializedRef = useRef(false)
+  const markingAsReadRef = useRef(false)
 
-  // Scroll automático al último mensaje
+  // ⚠️ Usar valores primitivos estables
+  const serviceId = service?.id
+  const currentUserId = currentUser?.id
+  const currentUserName = currentUser?.name
+  const currentUserRole = currentUser?.role
+
+  // Scroll automático
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [])
 
-  // Inicializar chat room
+  // 🔄 Inicializar chat room SOLO UNA VEZ
   useEffect(() => {
-    if (!service?.id || !currentUser?.id) return
+    if (!serviceId || !currentUserId || !currentUserRole) {
+      return
+    }
+
+    // Evitar múltiples inicializaciones
+    if (isInitializedRef.current) {
+      return
+    }
+    isInitializedRef.current = true
 
     const initChat = async () => {
+      console.log('🚀 ChatWindow: Inicializando chat para servicio:', serviceId)
       setLoading(true)
       
-      // Verificar si ya existe el chat room
-      let existingChat = await getChatRoom(service.id)
+      let existingChat = await getChatRoom(serviceId)
+      console.log('📋 Chat existente:', existingChat ? 'Sí' : 'No')
       
       if (!existingChat) {
-        // Crear el chat room si no existe
         const result = await createChatRoom(
-          service.id,
+          serviceId,
           service,
-          currentUser.role === 'restaurant' ? { name: currentUser.name } : null,
-          currentUser.role === 'driver' ? { id: currentUser.id, name: currentUser.name } : null
+          currentUserRole === 'restaurant' ? { name: currentUserName } : null,
+          currentUserRole === 'driver' ? { id: currentUserId, name: currentUserName } : null
         )
         
         if (result.success) {
-          existingChat = await getChatRoom(service.id)
+          existingChat = await getChatRoom(serviceId)
         }
       }
       
@@ -115,40 +121,63 @@ export default function ChatWindow({
     }
     
     initChat()
-  }, [service?.id, currentUser])
+  }, [serviceId, currentUserId, currentUserName, currentUserRole, service])
 
-  // Suscribirse a mensajes
+  // 📨 Suscribirse a mensajes - CON DEPENDENCIAS ESTABLES
   useEffect(() => {
-    if (!service?.id) return
+    if (!serviceId) return
 
-    const unsubscribe = subscribeToMessages(service.id, (msgs) => {
+    // Evitar múltiples suscripciones
+    if (isSubscribedRef.current) return
+    isSubscribedRef.current = true
+
+    console.log('🔔 ChatWindow: Configurando suscripción de mensajes para:', serviceId)
+
+    const unsubscribe = subscribeToMessages(serviceId, (msgs) => {
       setMessages(msgs)
       setLoading(false)
-      
-      // Scroll al final cuando llegan nuevos mensajes
       setTimeout(scrollToBottom, 100)
     })
 
-    return () => unsubscribe()
-  }, [service?.id, scrollToBottom])
+    return () => {
+      console.log('🧹 ChatWindow: Cleanup de mensajes')
+      isSubscribedRef.current = false
+      unsubscribe()
+    }
+  }, [serviceId, scrollToBottom])
 
-  // Suscribirse a cambios en el chat room
+  // 📋 Suscribirse a cambios del chat room
   useEffect(() => {
-    if (!service?.id || !currentUser?.role) return
+    if (!serviceId || !currentUserRole) return
 
-    const unsubscribe = subscribeToChatRoom(service.id, (room) => {
+    console.log('🔔 ChatWindow: Configurando suscripción de chat room para:', serviceId)
+
+    const unsubscribe = subscribeToChatRoom(serviceId, (room) => {
       setChatRoom(room)
     })
 
-    return () => unsubscribe()
-  }, [service?.id, currentUser?.role])
+    return () => {
+      console.log('🧹 ChatWindow: Cleanup de chat room')
+      unsubscribe()
+    }
+  }, [serviceId, currentUserRole])
 
   // Marcar mensajes como leídos cuando el chat está abierto
   useEffect(() => {
-    if (open && service?.id && currentUser?.role && messages.length > 0) {
-      markMessagesAsRead(service.id, currentUser.role)
+    const markAsRead = async () => {
+      if (open && serviceId && currentUserRole && messages.length > 0 && !markingAsReadRef.current) {
+        markingAsReadRef.current = true
+        console.log('📖 ChatWindow: Marcando mensajes como leídos')
+        await markMessagesAsRead(serviceId, currentUserRole)
+        // Pequeño delay para evitar llamadas duplicadas
+        setTimeout(() => {
+          markingAsReadRef.current = false
+        }, 500)
+      }
     }
-  }, [open, service?.id, currentUser?.role, messages.length])
+    
+    markAsRead()
+  }, [open, serviceId, currentUserRole, messages.length])
 
   // Scroll inicial
   useEffect(() => {
@@ -157,19 +186,30 @@ export default function ChatWindow({
     }
   }, [loading, messages.length, scrollToBottom])
 
+  // Resetear cuando se cierra
+  useEffect(() => {
+    if (!open) {
+      isInitializedRef.current = false
+      isSubscribedRef.current = false
+      markingAsReadRef.current = false
+    }
+  }, [open])
+
   // Enviar mensaje
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || sending || !service?.id) return
+    if (!newMessage.trim() || sending || !serviceId || !currentUserId || !currentUserName || !currentUserRole) return
     
     setSending(true)
     const messageText = newMessage.trim()
     setNewMessage('')
     
+    console.log('📤 ChatWindow: Enviando mensaje:', messageText)
+    
     const result = await sendMessage(
-      service.id,
-      currentUser.id,
-      currentUser.name,
-      currentUser.role,
+      serviceId,
+      currentUserId,
+      currentUserName,
+      currentUserRole,
       messageText
     )
     
@@ -177,10 +217,9 @@ export default function ChatWindow({
     
     if (!result.success) {
       enqueueSnackbar('Error al enviar mensaje', { variant: 'error' })
-      setNewMessage(messageText) // Restaurar mensaje
+      setNewMessage(messageText)
     }
     
-    // Focus en el input
     inputRef.current?.focus()
   }
 
@@ -192,15 +231,15 @@ export default function ChatWindow({
     }
   }
 
-  // Obtener contador de no leídos
-  const unreadCount = currentUser?.role === 'restaurant' 
+  // Contador de no leídos
+  const unreadCount = currentUserRole === 'restaurant' 
     ? (chatRoom?.unreadByRestaurant || 0)
     : (chatRoom?.unreadByDriver || 0)
 
   // Si está cerrado
   if (!open) return null
 
-  // Modo mini (esquina inferior)
+  // Modo mini
   if (miniMode) {
     return (
       <Slide direction="up" in={open} mountOnEnter unmountOnExit>
@@ -220,10 +259,10 @@ export default function ChatWindow({
             transition: 'all 0.3s ease'
           }}
         >
-          {/* Header Mini */}
+          {/* Header */}
           <Box
             sx={{
-              bgcolor: currentUser?.role === 'restaurant' ? 'primary.main' : 'success.main',
+              bgcolor: currentUserRole === 'restaurant' ? 'primary.main' : 'success.main',
               color: 'white',
               p: 1.5,
               cursor: 'pointer',
@@ -242,7 +281,7 @@ export default function ChatWindow({
                   {otherParty?.name || 'Chat'}
                 </Typography>
                 <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                  {currentUser?.role === 'restaurant' ? 'Repartidor' : 'Restaurante'}
+                  {currentUserRole === 'restaurant' ? 'Repartidor' : 'Restaurante'}
                 </Typography>
               </Box>
             </Stack>
@@ -256,7 +295,7 @@ export default function ChatWindow({
             </Stack>
           </Box>
 
-          {/* Chat content - collapsible */}
+          {/* Content */}
           <Fade in={expanded}>
             <Box sx={{ height: expanded ? 350 : 0, display: 'flex', flexDirection: 'column' }}>
               {/* Messages */}
@@ -285,7 +324,7 @@ export default function ChatWindow({
                     <ChatMessage
                       key={msg.id}
                       message={msg}
-                      currentUserId={currentUser?.id}
+                      currentUserId={currentUserId}
                       showAvatar={true}
                     />
                   ))
@@ -336,7 +375,7 @@ export default function ChatWindow({
     )
   }
 
-  // Modo completo (embebido)
+  // Modo completo
   return (
     <Paper
       elevation={0}
@@ -353,7 +392,7 @@ export default function ChatWindow({
       {/* Header */}
       <Box
         sx={{
-          bgcolor: currentUser?.role === 'restaurant' ? 'primary.main' : 'success.main',
+          bgcolor: currentUserRole === 'restaurant' ? 'primary.main' : 'success.main',
           color: 'white',
           p: 2,
           display: 'flex',
@@ -363,7 +402,7 @@ export default function ChatWindow({
       >
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
-            {otherParty?.role === 'restaurant' || currentUser?.role === 'driver' ? (
+            {otherParty?.role === 'restaurant' || currentUserRole === 'driver' ? (
               <StoreIcon />
             ) : (
               <BikeIcon />
@@ -376,7 +415,7 @@ export default function ChatWindow({
             <Stack direction="row" spacing={0.5} alignItems="center">
               <CircleIcon sx={{ fontSize: 8, color: 'success.light' }} />
               <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                {currentUser?.role === 'restaurant' ? 'Repartidor' : 'Restaurante'} • Servicio {service?.serviceId}
+                {currentUserRole === 'restaurant' ? 'Repartidor' : 'Restaurante'} • Servicio {service?.serviceId}
               </Typography>
             </Stack>
           </Box>
@@ -422,11 +461,11 @@ export default function ChatWindow({
             </Typography>
           </Box>
         ) : (
-          messages.map((msg, index) => (
+          messages.map((msg) => (
             <ChatMessage
               key={msg.id}
               message={msg}
-              currentUserId={currentUser?.id}
+              currentUserId={currentUserId}
               showAvatar={true}
             />
           ))

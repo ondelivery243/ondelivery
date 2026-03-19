@@ -8,10 +8,7 @@ import {
   off,
   update,
   get,
-  serverTimestamp,
-  query,
-  orderByChild,
-  limitToLast
+  serverTimestamp
 } from 'firebase/database'
 
 // ============================================
@@ -23,7 +20,6 @@ const CHAT_MESSAGES_PATH = 'messages'
 
 /**
  * Genera un ID único para el chat basado en el servicio
- * Formato: chat_{serviceId}
  */
 export const getChatId = (serviceId) => {
   return `chat_${serviceId}`
@@ -39,20 +35,21 @@ export const createChatRoom = async (serviceId, serviceData, restaurantData, dri
     
     const chatData = {
       serviceId,
-      restaurantId: serviceData.restaurantId,
-      restaurantName: restaurantData?.name || serviceData.restaurantName,
-      driverId: driverData?.id || serviceData.driverId,
-      driverName: driverData?.name || serviceData.driverName,
+      restaurantId: serviceData?.restaurantId,
+      restaurantName: restaurantData?.name || serviceData?.restaurantName || 'Restaurante',
+      driverId: driverData?.id || serviceData?.driverId,
+      driverName: driverData?.name || serviceData?.driverName || 'Repartidor',
       createdAt: Date.now(),
       updatedAt: Date.now(),
       lastMessage: null,
       lastMessageAt: null,
       unreadByRestaurant: 0,
       unreadByDriver: 0,
-      status: 'active' // active, closed
+      status: 'active'
     }
     
     await set(chatRef, chatData)
+    console.log('✅ Chat room creado:', chatId)
     return { success: true, chatId }
   } catch (error) {
     console.error('Error creando sala de chat:', error)
@@ -70,8 +67,10 @@ export const getChatRoom = async (serviceId) => {
     const snapshot = await get(chatRef)
     
     if (snapshot.exists()) {
+      console.log('✅ Chat room encontrado:', chatId)
       return { id: chatId, ...snapshot.val() }
     }
+    console.log('📭 Chat room no existe:', chatId)
     return null
   } catch (error) {
     console.error('Error obteniendo sala de chat:', error)
@@ -81,13 +80,6 @@ export const getChatRoom = async (serviceId) => {
 
 /**
  * Envía un mensaje en el chat
- * @param {string} serviceId - ID del servicio
- * @param {string} senderId - ID del remitente
- * @param {string} senderName - Nombre del remitente
- * @param {string} senderRole - 'restaurant' o 'driver'
- * @param {string} message - Contenido del mensaje
- * @param {string} type - 'text', 'image', 'location', 'system'
- * @param {object} metadata - Datos adicionales (ubicación, imagen, etc.)
  */
 export const sendMessage = async (serviceId, senderId, senderName, senderRole, message, type = 'text', metadata = null) => {
   try {
@@ -96,10 +88,11 @@ export const sendMessage = async (serviceId, senderId, senderName, senderRole, m
     const chatRef = ref(rtdb, `${CHATS_PATH}/${chatId}`)
     
     // Crear el mensaje
+    const newMessageRef = push(messagesRef)
     const newMessage = {
-      id: push(messagesRef).key,
+      id: newMessageRef.key,
       senderId,
-      senderName,
+      senderName: senderName || 'Usuario',
       senderRole,
       message,
       type,
@@ -109,11 +102,13 @@ export const sendMessage = async (serviceId, senderId, senderName, senderRole, m
     }
     
     // Guardar el mensaje
-    await set(ref(rtdb, `${CHATS_PATH}/${chatId}/${CHAT_MESSAGES_PATH}/${newMessage.id}`), newMessage)
+    await set(newMessageRef, newMessage)
+    console.log('✅ Mensaje guardado:', newMessage.id)
     
     // Actualizar último mensaje y contador de no leídos
+    const currentRoom = await getChatRoom(serviceId)
     const updates = {
-      lastMessage: message.substring(0, 100), // Limitar a 100 caracteres
+      lastMessage: message.substring(0, 100),
       lastMessageAt: Date.now(),
       lastMessageBy: senderRole,
       updatedAt: Date.now()
@@ -121,12 +116,13 @@ export const sendMessage = async (serviceId, senderId, senderName, senderRole, m
     
     // Incrementar contador de no leídos del otro participante
     if (senderRole === 'restaurant') {
-      updates.unreadByDriver = (await getUnreadCount(serviceId, 'driver')) + 1
+      updates.unreadByDriver = (currentRoom?.unreadByDriver || 0) + 1
     } else {
-      updates.unreadByRestaurant = (await getUnreadCount(serviceId, 'restaurant')) + 1
+      updates.unreadByRestaurant = (currentRoom?.unreadByRestaurant || 0) + 1
     }
     
     await update(chatRef, updates)
+    console.log('✅ Chat actualizado')
     
     return { success: true, messageId: newMessage.id }
   } catch (error) {
@@ -140,17 +136,16 @@ export const sendMessage = async (serviceId, senderId, senderName, senderRole, m
  */
 export const subscribeToMessages = (serviceId, callback) => {
   const chatId = getChatId(serviceId)
-  const messagesRef = query(
-    ref(rtdb, `${CHATS_PATH}/${chatId}/${CHAT_MESSAGES_PATH}`),
-    orderByChild('timestamp')
-  )
+  const messagesRef = ref(rtdb, `${CHATS_PATH}/${chatId}/${CHAT_MESSAGES_PATH}`)
+  
+  console.log('🔔 Suscribiendo a mensajes:', chatId)
   
   const unsubscribe = onValue(messagesRef, (snapshot) => {
     const messages = []
     snapshot.forEach((child) => {
       messages.push({ id: child.key, ...child.val() })
     })
-    // Ordenar por timestamp ascendente (más antiguos primero)
+    // Ordenar por timestamp ascendente
     messages.sort((a, b) => a.timestamp - b.timestamp)
     callback(messages)
   }, (error) => {
@@ -158,7 +153,10 @@ export const subscribeToMessages = (serviceId, callback) => {
     callback([])
   })
   
-  return () => off(messagesRef)
+  return () => {
+    console.log('🚫 Desuscribiendo de mensajes:', chatId)
+    off(messagesRef)
+  }
 }
 
 /**
@@ -167,6 +165,8 @@ export const subscribeToMessages = (serviceId, callback) => {
 export const subscribeToChatRoom = (serviceId, callback) => {
   const chatId = getChatId(serviceId)
   const chatRef = ref(rtdb, `${CHATS_PATH}/${chatId}`)
+  
+  console.log('🔔 Suscribiendo a chat room:', chatId)
   
   const unsubscribe = onValue(chatRef, (snapshot) => {
     if (snapshot.exists()) {
@@ -179,11 +179,15 @@ export const subscribeToChatRoom = (serviceId, callback) => {
     callback(null)
   })
   
-  return () => off(chatRef)
+  return () => {
+    console.log('🚫 Desuscribiendo de chat room:', chatId)
+    off(chatRef)
+  }
 }
 
 /**
  * Marca los mensajes como leídos
+ * Actualiza tanto el contador como el campo 'read' de cada mensaje
  */
 export const markMessagesAsRead = async (serviceId, readerRole) => {
   try {
@@ -191,24 +195,30 @@ export const markMessagesAsRead = async (serviceId, readerRole) => {
     const chatRef = ref(rtdb, `${CHATS_PATH}/${chatId}`)
     const messagesRef = ref(rtdb, `${CHATS_PATH}/${chatId}/${CHAT_MESSAGES_PATH}`)
     
-    // Obtener todos los mensajes
-    const snapshot = await get(messagesRef)
-    const updates = {}
+    // 1. Obtener todos los mensajes
+    const messagesSnapshot = await get(messagesRef)
     
-    snapshot.forEach((child) => {
-      const message = child.val()
-      // Solo marcar como leídos los mensajes del otro participante
-      if (message.senderRole !== readerRole && !message.read) {
-        updates[`${child.key}/read`] = true
+    if (messagesSnapshot.exists()) {
+      const updates = {}
+      const senderRole = readerRole === 'restaurant' ? 'driver' : 'restaurant'
+      
+      // 2. Marcar como leídos solo los mensajes del OTRO participante
+      messagesSnapshot.forEach((child) => {
+        const msgData = child.val()
+        // Solo marcar mensajes que NO son del lector actual y que no han sido leídos
+        if (msgData.senderRole === senderRole && msgData.read === false) {
+          updates[`${child.key}/read`] = true
+        }
+      })
+      
+      // 3. Actualizar mensajes si hay cambios
+      if (Object.keys(updates).length > 0) {
+        await update(messagesRef, updates)
+        console.log(`✅ ${Object.keys(updates).length} mensajes marcados como leídos`)
       }
-    })
-    
-    // Actualizar mensajes
-    if (Object.keys(updates).length > 0) {
-      await update(messagesRef, updates)
     }
     
-    // Resetear contador de no leídos
+    // 4. Resetear contador de no leídos
     const unreadUpdate = readerRole === 'restaurant' 
       ? { unreadByRestaurant: 0 }
       : { unreadByDriver: 0 }
@@ -245,7 +255,7 @@ export const getUnreadCount = async (serviceId, role) => {
 }
 
 /**
- * Suscribe a todos los chats de un usuario (para lista de conversaciones)
+ * Suscribe a todos los chats de un usuario
  */
 export const subscribeToUserChats = (userId, role, callback) => {
   const chatsRef = ref(rtdb, CHATS_PATH)
@@ -254,7 +264,6 @@ export const subscribeToUserChats = (userId, role, callback) => {
     const chats = []
     snapshot.forEach((child) => {
       const chat = { id: child.key, ...child.val() }
-      // Filtrar por usuario según su rol
       const isParticipant = role === 'restaurant' 
         ? chat.restaurantId === userId
         : chat.driverId === userId
@@ -263,7 +272,6 @@ export const subscribeToUserChats = (userId, role, callback) => {
         chats.push(chat)
       }
     })
-    // Ordenar por último mensaje (más recientes primero)
     chats.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0))
     callback(chats)
   }, (error) => {
@@ -275,7 +283,7 @@ export const subscribeToUserChats = (userId, role, callback) => {
 }
 
 /**
- * Cierra el chat (cuando el servicio se completa o cancela)
+ * Cierra el chat
  */
 export const closeChat = async (serviceId) => {
   try {
@@ -295,7 +303,7 @@ export const closeChat = async (serviceId) => {
 }
 
 /**
- * Envía un mensaje de sistema (automático)
+ * Envía un mensaje de sistema
  */
 export const sendSystemMessage = async (serviceId, message) => {
   try {
@@ -315,7 +323,6 @@ export const sendSystemMessage = async (serviceId, message) => {
     
     await set(ref(rtdb, `${CHATS_PATH}/${chatId}/${CHAT_MESSAGES_PATH}/${systemMessage.id}`), systemMessage)
     
-    // Actualizar último mensaje
     const chatRef = ref(rtdb, `${CHATS_PATH}/${chatId}`)
     await update(chatRef, {
       lastMessage: message,
@@ -341,12 +348,10 @@ export const formatChatTime = (timestamp) => {
   const now = new Date()
   const diff = now - date
   
-  // Si es menos de 24 horas, mostrar hora
   if (diff < 86400000) {
     return date.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' })
   }
   
-  // Si es más de 24 horas, mostrar fecha y hora
   return date.toLocaleDateString('es-VE', { 
     day: '2-digit', 
     month: '2-digit',

@@ -25,12 +25,9 @@ import { db } from '../config/firebase'
 // UTILIDAD: Manejo de errores de permisos
 // ============================================
 const handleSnapshotError = (error) => {
-  // Silenciar errores de permisos (ocurren durante logout)
   if (error.code === 'permission-denied' || error.message?.includes('permission')) {
-    // Error esperado durante logout - no mostrar en consola
     return
   }
-  // Otros errores sí se muestran
   console.error('Error en snapshot:', error)
 }
 
@@ -136,7 +133,6 @@ export const getRestaurantByUserId = async (userId) => {
     }
     return null
   } catch (error) {
-    // Silenciar error de permisos durante logout
     if (error.code === 'permission-denied' || error.message?.includes('permission')) {
       return null
     }
@@ -181,23 +177,17 @@ export const updateRestaurant = async (restaurantId, restaurantData) => {
   }
 }
 
-// Activar/desactivar restaurante Y su usuario correspondiente
 export const toggleRestaurantActive = async (restaurantId, userId, active) => {
   try {
     const batch = writeBatch(db)
-    
-    // Actualizar restaurante
     batch.update(doc(db, RESTAURANTS_COLLECTION, restaurantId), {
       active,
       updatedAt: serverTimestamp()
     })
-    
-    // Actualizar usuario
     batch.update(doc(db, USERS_COLLECTION, userId), {
       active,
       updatedAt: serverTimestamp()
     })
-    
     await batch.commit()
     return { success: true }
   } catch (error) {
@@ -256,7 +246,6 @@ export const getDriverByUserId = async (userId) => {
     }
     return null
   } catch (error) {
-    // Silenciar error de permisos durante logout
     if (error.code === 'permission-denied' || error.message?.includes('permission')) {
       return null
     }
@@ -320,23 +309,17 @@ export const updateDriver = async (driverId, driverData) => {
   }
 }
 
-// Activar/desactivar repartidor Y su usuario correspondiente
 export const toggleDriverActive = async (driverId, userId, active) => {
   try {
     const batch = writeBatch(db)
-    
-    // Actualizar repartidor
     batch.update(doc(db, DRIVERS_COLLECTION, driverId), {
       active,
       updatedAt: serverTimestamp()
     })
-    
-    // Actualizar usuario
     batch.update(doc(db, USERS_COLLECTION, userId), {
       active,
       updatedAt: serverTimestamp()
     })
-    
     await batch.commit()
     return { success: true }
   } catch (error) {
@@ -482,38 +465,99 @@ export const subscribeToRestaurantServices = (restaurantId, callback) => {
   )
 }
 
+// ============================================
+// CREAR SERVICIO - CON BROADCAST
+// ============================================
 export const createService = async (serviceData) => {
   try {
+    console.log('📝 Creando servicio...', serviceData)
+    
     // Generar ID de servicio con formato: DDMMAAHHMM + iniciales del restaurante
-    // Ejemplo: 1503260124PR (15 de marzo de 2026, 01:24, PR = Pollo Rico)
     const now = new Date()
     const day = String(now.getDate()).padStart(2, '0')
     const month = String(now.getMonth() + 1).padStart(2, '0')
-    const year = String(now.getFullYear()).slice(-2) // Últimos 2 dígitos del año
+    const year = String(now.getFullYear()).slice(-2)
     const hours = String(now.getHours()).padStart(2, '0')
     const minutes = String(now.getMinutes()).padStart(2, '0')
     
-    // Obtener iniciales del restaurante (primeras letras de cada palabra, máx 3)
     const restaurantName = serviceData.restaurantName || ''
     const initials = restaurantName
       .split(' ')
       .map(word => word.charAt(0).toUpperCase())
       .join('')
       .substring(0, 3)
-      .padEnd(2, 'X') // Mínimo 2 caracteres
+      .padEnd(2, 'X')
     
-    // Formato: DDMMAAHHMM + Iniciales (ej: 1503260124PR)
     const serviceId = `${day}${month}${year}${hours}${minutes}${initials}`
+    console.log('📋 Service ID generado:', serviceId)
 
+    // Obtener ubicación del restaurante
+    let restaurantLocation = null
+    if (serviceData.restaurantId) {
+      try {
+        const restaurantDoc = await getDoc(doc(db, 'restaurants', serviceData.restaurantId))
+        if (restaurantDoc.exists()) {
+          const rData = restaurantDoc.data()
+          if (rData.latitude && rData.longitude) {
+            restaurantLocation = {
+              latitude: rData.latitude,
+              longitude: rData.longitude
+            }
+            console.log('📍 Ubicación del restaurante:', restaurantLocation)
+          }
+        }
+      } catch (e) {
+        console.log('⚠️ No se pudo obtener ubicación del restaurante:', e.message)
+      }
+    }
+
+    // Si no hay ubicación, usar Maracay centro
+    if (!restaurantLocation) {
+      restaurantLocation = {
+        latitude: 10.2647,
+        longitude: -67.6084
+      }
+      console.log('⚠️ Usando ubicación por defecto (Maracay centro)')
+    }
+
+    // Crear el servicio en Firestore
     const docRef = await addDoc(collection(db, SERVICES_COLLECTION), {
       ...serviceData,
       serviceId,
       status: 'pendiente',
+      broadcastStatus: 'pending',
+      broadcastAttempts: 0,
+      broadcastRadius: 0,
+      restaurantLocation,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     })
+
+    console.log('✅ Servicio creado en Firestore:', docRef.id)
+
+    // 📢 INICIAR BROADCAST para notificar repartidores
+    console.log('📢 Iniciando broadcast...')
+    
+    try {
+      const { createServiceBroadcast } = await import('./broadcastService.js')
+      const broadcastResult = await createServiceBroadcast(docRef.id, {
+        ...serviceData,
+        serviceId,
+        restaurantLocation
+      })
+      
+      if (broadcastResult.success) {
+        console.log('✅ Broadcast iniciado correctamente')
+      } else {
+        console.error('❌ Error en broadcast:', broadcastResult.error)
+      }
+    } catch (broadcastError) {
+      console.error('❌ Error importando/iniciando broadcast:', broadcastError)
+    }
+
     return { success: true, id: docRef.id, serviceId }
   } catch (error) {
+    console.error('❌ Error creando servicio:', error)
     return { success: false, error: error.message }
   }
 }
@@ -541,13 +585,12 @@ export const acceptService = async (serviceId, driverId, driverName) => {
       updatedAt: serverTimestamp()
     })
     
-    // Trigger: Notificar al restaurante
     const serviceDoc = await getDoc(serviceRef)
     if (serviceDoc.exists()) {
       const serviceData = { id: serviceId, ...serviceDoc.data() }
       import('./notificationTriggers').then(({ triggerServiceAccepted }) => {
         triggerServiceAccepted(serviceData, { id: driverId, name: driverName })
-      })
+      }).catch(() => {})
     }
     
     return { success: true }
@@ -565,13 +608,12 @@ export const startService = async (serviceId) => {
       updatedAt: serverTimestamp()
     })
     
-    // Trigger: Notificar al restaurante que el repartidor esta en camino
     const serviceDoc = await getDoc(serviceRef)
     if (serviceDoc.exists()) {
       const serviceData = { id: serviceId, ...serviceDoc.data() }
       import('./notificationTriggers').then(({ triggerServiceOnTheWay }) => {
         triggerServiceOnTheWay(serviceData)
-      })
+      }).catch(() => {})
     }
     
     return { success: true }
@@ -584,7 +626,6 @@ export const completeService = async (serviceId, driverEarnings) => {
   try {
     const batch = writeBatch(db)
     
-    // Actualizar servicio
     const serviceRef = doc(db, SERVICES_COLLECTION, serviceId)
     batch.update(serviceRef, {
       status: 'entregado',
@@ -592,7 +633,6 @@ export const completeService = async (serviceId, driverEarnings) => {
       updatedAt: serverTimestamp()
     })
     
-    // Actualizar estadisticas del repartidor
     const serviceDoc = await getDoc(serviceRef)
     if (serviceDoc.exists() && serviceDoc.data().driverId) {
       const driverRef = doc(db, DRIVERS_COLLECTION, serviceDoc.data().driverId)
@@ -605,12 +645,11 @@ export const completeService = async (serviceId, driverEarnings) => {
     
     await batch.commit()
     
-    // Trigger: Notificar al restaurante que el servicio fue completado
     if (serviceDoc.exists()) {
       const serviceData = { id: serviceId, ...serviceDoc.data() }
       import('./notificationTriggers').then(({ triggerServiceCompleted }) => {
         triggerServiceCompleted(serviceData)
-      })
+      }).catch(() => {})
     }
     
     return { success: true }
@@ -630,13 +669,12 @@ export const cancelService = async (serviceId, reason = '', cancelledBy = 'syste
       updatedAt: serverTimestamp()
     })
     
-    // Trigger: Notificar a las partes involucradas
     const serviceDoc = await getDoc(serviceRef)
     if (serviceDoc.exists()) {
       const serviceData = { id: serviceId, ...serviceDoc.data() }
       import('./notificationTriggers').then(({ triggerServiceCancelled }) => {
         triggerServiceCancelled(serviceData, cancelledBy)
-      })
+      }).catch(() => {})
     }
     
     return { success: true }
@@ -761,7 +799,6 @@ export const getDashboardStats = async () => {
     const inProgressServices = services.filter(s => s.status === 'en_camino').length
     const completedToday = servicesToday.filter(s => s.status === 'entregado').length
     
-    // Calcular ingresos del mes
     const monthStart = new Date()
     monthStart.setDate(1)
     monthStart.setHours(0, 0, 0, 0)
@@ -946,7 +983,6 @@ export const updateUser = async (userId, userData) => {
 export const APP_CONFIG_COLLECTION = 'settings'
 export const APP_CONFIG_DOC = 'app_config'
 
-// Obtener la tasa de cambio actual
 export const getExchangeRate = async () => {
   try {
     const docRef = doc(db, APP_CONFIG_COLLECTION, APP_CONFIG_DOC)
@@ -967,7 +1003,6 @@ export const getExchangeRate = async () => {
   }
 }
 
-// Suscribirse a cambios en la tasa de cambio
 export const subscribeToExchangeRate = (callback) => {
   const docRef = doc(db, APP_CONFIG_COLLECTION, APP_CONFIG_DOC)
   return onSnapshot(docRef, 
@@ -988,13 +1023,11 @@ export const subscribeToExchangeRate = (callback) => {
   )
 }
 
-// Convertir USD a Bolívares
 export const convertUsdToVes = (usdAmount, exchangeRate) => {
   if (!exchangeRate || exchangeRate <= 0) return 0
   return usdAmount * exchangeRate
 }
 
-// Formatear monto en Bolívares
 export const formatVes = (amount) => {
   return new Intl.NumberFormat('es-VE', {
     style: 'currency',

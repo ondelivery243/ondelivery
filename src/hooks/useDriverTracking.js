@@ -15,6 +15,8 @@ import {
 
 /**
  * Hook para manejar el tracking GPS del repartidor
+ * NOTA: El driver permanece ONLINE aunque cambie de pestaña
+ * Solo se desconecta cuando cierra la app (onDisconnect de Firebase)
  */
 export const useDriverTracking = (driverData, currentService = null) => {
   const { enqueueSnackbar } = useSnackbar()
@@ -32,7 +34,7 @@ export const useDriverTracking = (driverData, currentService = null) => {
   const isMounted = useRef(true)
   const locationRetryRef = useRef(null)
 
-  // ✅ Verificar permisos al montar
+  // Verificar permisos al montar
   useEffect(() => {
     const checkPermission = async () => {
       console.log('🔍 useDriverTracking: Verificando permisos...')
@@ -48,7 +50,7 @@ export const useDriverTracking = (driverData, currentService = null) => {
     checkPermission()
   }, [])
 
-  // ✅ Iniciar tracking - CORREGIDO
+  // Iniciar tracking
   const startTracking = useCallback(async () => {
     console.log('🚀 startTracking llamado, driverData:', driverData?.id)
     
@@ -59,14 +61,9 @@ export const useDriverTracking = (driverData, currentService = null) => {
       return Promise.reject(err)
     }
 
-    // ✅ IMPORTANTE: Resetear isMounted a true
     isMounted.current = true
-    console.log('✅ isMounted reseteado a true')
 
-    // Verificar permisos primero
-    console.log('🔍 Verificando permisos antes de iniciar...')
     const permCheck = await checkGeolocationPermission()
-    console.log('📋 Permiso:', permCheck)
     
     if (permCheck.granted === false) {
       setError(permCheck.reason)
@@ -78,19 +75,14 @@ export const useDriverTracking = (driverData, currentService = null) => {
     setIsTracking(true)
     setIsInitialized(true)
     
-    // ✅ INTENTAR OBTENER UBICACIÓN INMEDIATAMENTE
-    console.log('📍 Intentando obtener ubicación inicial...')
+    // Obtener ubicación inicial
     try {
       const position = await getCurrentPosition()
-      console.log('✅ Ubicación inicial obtenida:', position)
       if (isMounted.current && position) {
         setCurrentLocation(position)
-        console.log('✅ Estado currentLocation actualizado')
-        enqueueSnackbar('Ubicación obtenida', { variant: 'success' })
       }
     } catch (err) {
       console.log('⚠️ Primera ubicación no disponible:', err.message)
-      // No es crítico, el watch continuará intentando
     }
 
     // Iniciar tracking continuo
@@ -98,14 +90,9 @@ export const useDriverTracking = (driverData, currentService = null) => {
     trackingControl.current = startDriverTracking(
       driverData.id,
       (location) => {
-        console.log('📍 Ubicación recibida en callback:', location)
-        console.log('📍 isMounted.current:', isMounted.current)
         if (isMounted.current) {
           setCurrentLocation(location)
           setError(null)
-          console.log('✅ currentLocation actualizado en callback')
-        } else {
-          console.log('❌ SKIP actualización - isMounted es false')
         }
         
         if (currentService?.id && currentService.id !== lastServiceId.current) {
@@ -119,8 +106,6 @@ export const useDriverTracking = (driverData, currentService = null) => {
             setError(err.message)
             setIsTracking(false)
             enqueueSnackbar(err.message, { variant: 'error' })
-          } else if (err.message.includes('tardando') || err.message.includes('TIMEOUT')) {
-            enqueueSnackbar(err.message, { variant: 'warning' })
           }
         }
       }
@@ -140,7 +125,7 @@ export const useDriverTracking = (driverData, currentService = null) => {
     return Promise.resolve()
   }, [driverData, currentService, enqueueSnackbar])
 
-  // ✅ Detener tracking
+  // Detener tracking
   const stopTracking = useCallback(async () => {
     console.log('🛑 stopTracking llamado')
     isMounted.current = false
@@ -175,16 +160,12 @@ export const useDriverTracking = (driverData, currentService = null) => {
     enqueueSnackbar('GPS desactivado', { variant: 'info' })
   }, [driverData, enqueueSnackbar])
 
-  // ✅ Función para forzar obtención de ubicación
+  // Forzar obtención de ubicación
   const forceGetLocation = useCallback(async () => {
-    console.log('🔄 forceGetLocation llamado')
-    
-    // Asegurar que isMounted está en true
     isMounted.current = true
     
     try {
       const position = await getCurrentPosition({ timeout: 20000 })
-      console.log('✅ Ubicación forzada obtenida:', position)
       if (isMounted.current && position) {
         setCurrentLocation(position)
         setError(null)
@@ -195,12 +176,8 @@ export const useDriverTracking = (driverData, currentService = null) => {
       console.error('❌ Error en forceGetLocation:', err.message)
       if (isMounted.current) {
         if (err.message === 'PERMISSION_DENIED') {
-          setError('Permiso de ubicación denegado. Habilita el GPS en tu navegador.')
-          enqueueSnackbar('Habilita el permiso de ubicación en tu navegador', { variant: 'error' })
-        } else if (err.message === 'TIMEOUT') {
-          enqueueSnackbar('El GPS está tardando. Intenta salir al exterior.', { variant: 'warning' })
-        } else if (err.message === 'POSITION_UNAVAILABLE') {
-          enqueueSnackbar('Ubicación no disponible. Verifica el GPS del dispositivo.', { variant: 'warning' })
+          setError('Permiso de ubicación denegado')
+          enqueueSnackbar('Habilita el permiso de ubicación', { variant: 'error' })
         } else {
           enqueueSnackbar('No se pudo obtener la ubicación', { variant: 'warning' })
         }

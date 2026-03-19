@@ -112,44 +112,61 @@ export const sendNotification = async (userIds, notificationType, data = {}) => 
     
     // Crear notificación en Firestore para cada usuario
     const notificationPromises = userIdArray.map(async (userId) => {
-      // Guardar en colección de notificaciones
-      const notificationRef = await addDoc(collection(db, NOTIFICATIONS_COLLECTION), {
-        userId,
-        type: notificationType.type,
-        title: notificationType.title,
-        body: typeof notificationType.body === 'function' 
-          ? notificationType.body(data) 
-          : notificationType.body,
-        icon: notificationType.icon,
-        sound: notificationType.sound,
-        priority: notificationType.priority,
-        data,
-        read: false,
-        createdAt: serverTimestamp()
-      })
-
-      // Enviar push notification via Netlify Function
-      await sendPushNotification(userId, {
-        title: notificationType.title,
-        body: typeof notificationType.body === 'function' 
-          ? notificationType.body(data) 
-          : notificationType.body,
-        data: {
+      // Intentar guardar en colección de notificaciones (puede fallar por permisos)
+      try {
+        const notificationRef = await addDoc(collection(db, NOTIFICATIONS_COLLECTION), {
+          userId,
           type: notificationType.type,
-          notificationId: notificationRef.id,
-          ...data
-        }
-      })
+          title: notificationType.title,
+          body: typeof notificationType.body === 'function' 
+            ? notificationType.body(data) 
+            : notificationType.body,
+          icon: notificationType.icon,
+          sound: notificationType.sound,
+          priority: notificationType.priority,
+          data,
+          read: false,
+          createdAt: serverTimestamp()
+        })
 
-      return notificationRef.id
+        // Enviar push notification via Netlify Function (opcional)
+        try {
+          await sendPushNotification(userId, {
+            title: notificationType.title,
+            body: typeof notificationType.body === 'function' 
+              ? notificationType.body(data) 
+              : notificationType.body,
+            data: {
+              type: notificationType.type,
+              notificationId: notificationRef.id,
+              ...data
+            }
+          })
+        } catch (pushError) {
+          // Push notification falló, pero no es crítico
+          console.log('⚠️ Push notification no enviada:', pushError.message)
+        }
+
+        return notificationRef.id
+      } catch (firestoreError) {
+        // Si falla Firestore, solo log y continuar
+        console.log('⚠️ No se pudo guardar notificación en Firestore:', firestoreError.message)
+        return null
+      }
     })
 
     const notificationIds = await Promise.all(notificationPromises)
-    console.log(`✅ ${notificationIds.length} notificación(es) enviada(s)`)
+    const successCount = notificationIds.filter(id => id !== null).length
+    
+    if (successCount > 0) {
+      console.log(`✅ ${successCount} notificación(es) enviada(s)`)
+    }
+    
     return { success: true, notificationIds }
   } catch (error) {
-    console.error('❌ Error enviando notificación:', error)
-    return { success: false, error: error.message }
+    // No bloquear el flujo principal si las notificaciones fallan
+    console.log('⚠️ Notificaciones no disponibles:', error.message)
+    return { success: false, error: error.message, silent: true }
   }
 }
 
@@ -172,7 +189,7 @@ const sendPushNotification = async (userId, payload) => {
     const result = await response.json()
     return result
   } catch (error) {
-    console.error('Error enviando push:', error)
+    console.log('Error enviando push:', error)
     return { success: false, error: error.message }
   }
 }
@@ -214,8 +231,8 @@ export const triggerNewService = async (serviceData) => {
       url: '/repartidor'
     })
   } catch (error) {
-    console.error('Error en triggerNewService:', error)
-    return { success: false, error: error.message }
+    console.log('Error en triggerNewService:', error.message)
+    return { success: false, error: error.message, silent: true }
   }
 }
 
@@ -248,8 +265,8 @@ export const triggerServiceAccepted = async (serviceData, driverData) => {
       url: '/restaurante'
     })
   } catch (error) {
-    console.error('Error en triggerServiceAccepted:', error)
-    return { success: false, error: error.message }
+    console.log('Error en triggerServiceAccepted:', error.message)
+    return { success: false, error: error.message, silent: true }
   }
 }
 
@@ -280,8 +297,8 @@ export const triggerServiceOnTheWay = async (serviceData) => {
       url: '/restaurante'
     })
   } catch (error) {
-    console.error('Error en triggerServiceOnTheWay:', error)
-    return { success: false, error: error.message }
+    console.log('Error en triggerServiceOnTheWay:', error.message)
+    return { success: false, error: error.message, silent: true }
   }
 }
 
@@ -308,8 +325,8 @@ export const triggerServiceCompleted = async (serviceData) => {
       url: '/restaurante'
     })
   } catch (error) {
-    console.error('Error en triggerServiceCompleted:', error)
-    return { success: false, error: error.message }
+    console.log('Error en triggerServiceCompleted:', error.message)
+    return { success: false, error: error.message, silent: true }
   }
 }
 
@@ -360,8 +377,8 @@ export const triggerServiceCancelled = async (serviceData, cancelledBy) => {
     await Promise.all(notifications)
     return { success: true }
   } catch (error) {
-    console.error('Error en triggerServiceCancelled:', error)
-    return { success: false, error: error.message }
+    console.log('Error en triggerServiceCancelled:', error.message)
+    return { success: false, error: error.message, silent: true }
   }
 }
 
@@ -396,6 +413,9 @@ export const subscribeToNotifications = (userId, callback) => {
       ...doc.data()
     }))
     callback(notifications)
+  }, (error) => {
+    console.log('⚠️ Suscripción a notificaciones no disponible:', error.message)
+    callback([])
   })
 }
 

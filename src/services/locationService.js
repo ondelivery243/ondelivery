@@ -1,6 +1,6 @@
 // src/services/locationService.js
 // Servicio de rastreo GPS en tiempo real para repartidores
-import { ref, set, onValue, off, remove, update, push } from 'firebase/database'
+import { ref, set, onValue, off, remove, update, push, onDisconnect } from 'firebase/database'
 import { rtdb, auth } from '../config/firebase'
 
 // Colecciones en Realtime Database
@@ -102,7 +102,114 @@ export const getCurrentPosition = (options = {}) => {
 }
 
 // ============================================
-// TRACKING CONTINUO - MEJORADO
+// CONFIGURAR AUTO-DESCONEXIÓN
+// ============================================
+
+export const setupAutoDisconnect = (driverId) => {
+  if (!driverId || !auth.currentUser) {
+    console.log('⚠️ No se puede configurar auto-desconexión: sin driverId o sin auth')
+    return null
+  }
+
+  console.log('🔧 Configurando auto-desconexión para driver:', driverId)
+  
+  const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
+  
+  // Configurar onDisconnect para marcar offline cuando se pierda conexión
+  const disconnectHandler = onDisconnect(locationRef)
+  
+  disconnectHandler.update({
+    online: false,
+    lastSeen: Date.now(),
+    disconnectedAt: new Date().toISOString()
+  }).then(() => {
+    console.log('✅ Auto-desconexión configurada correctamente')
+  }).catch((error) => {
+    console.error('❌ Error configurando auto-desconexión:', error.message)
+  })
+
+  return disconnectHandler
+}
+
+// ============================================
+// CANCELAR AUTO-DESCONEXIÓN
+// ============================================
+
+export const cancelAutoDisconnect = async (driverId) => {
+  if (!driverId) return
+  
+  console.log('🚫 Cancelando auto-desconexión para driver:', driverId)
+  
+  const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
+  
+  try {
+    // Cancelar el onDisconnect
+    await onDisconnect(locationRef).cancel()
+    console.log('✅ Auto-desconexión cancelada')
+  } catch (error) {
+    console.error('❌ Error cancelando auto-desconexión:', error.message)
+  }
+}
+
+// ============================================
+// MARCAR DRIVER COMO OFFLINE
+// ============================================
+
+export const setDriverOffline = async (driverId) => {
+  if (!driverId || !auth.currentUser) {
+    console.log('⚠️ No se puede marcar offline: sin driverId o sin auth')
+    return false
+  }
+
+  console.log('🔴 Marcando driver como offline:', driverId)
+  
+  const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
+  
+  try {
+    await update(locationRef, {
+      online: false,
+      lastSeen: Date.now(),
+      disconnectedAt: new Date().toISOString()
+    })
+    console.log('✅ Driver marcado como offline en RTDB')
+    return true
+  } catch (error) {
+    console.error('❌ Error marcando driver offline:', error.message)
+    return false
+  }
+}
+
+// ============================================
+// MARCAR DRIVER COMO ONLINE
+// ============================================
+
+export const setDriverOnlineRTDB = async (driverId, locationData = {}) => {
+  if (!driverId || !auth.currentUser) {
+    console.log('⚠️ No se puede marcar online: sin driverId o sin auth')
+    return false
+  }
+
+  console.log('🟢 Marcando driver como online:', driverId)
+  
+  const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
+  
+  try {
+    await update(locationRef, {
+      ...locationData,
+      online: true,
+      lastSeen: Date.now(),
+      connectedAt: new Date().toISOString()
+    })
+    console.log('✅ Driver marcado como online en RTDB')
+    return true
+  } catch (error) {
+    console.error('❌ Error marcando driver online:', error.message)
+    return false
+  }
+}
+
+// ============================================
+// TRACKING CONTINUO - MEJORADO CON AUTO-DESCONEXIÓN
 // ============================================
 
 export const startDriverTracking = (driverId, onLocationUpdate, onError) => {
@@ -118,6 +225,18 @@ export const startDriverTracking = (driverId, onLocationUpdate, onError) => {
   const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
   
   const isAuthenticated = () => !!auth.currentUser
+
+  // ✅ CONFIGURAR AUTO-DESCONEXIÓN AL INICIAR
+  const disconnectHandler = onDisconnect(locationRef)
+  disconnectHandler.update({
+    online: false,
+    lastSeen: Date.now(),
+    disconnectedAt: new Date().toISOString()
+  }).then(() => {
+    console.log('✅ Auto-desconexión configurada')
+  }).catch((error) => {
+    console.error('❌ Error configurando auto-desconexión:', error.message)
+  })
 
   const updateLocation = async (position) => {
     if (isStopped || !isAuthenticated()) {
@@ -152,7 +271,8 @@ export const startDriverTracking = (driverId, onLocationUpdate, onError) => {
       speed: speed || 0,
       accuracy: accuracy || 0,
       timestamp,
-      lastUpdate: new Date().toISOString()
+      lastUpdate: new Date().toISOString(),
+      online: true  // ✅ SIEMPRE MARCAR ONLINE AL ACTUALIZAR
     }
 
     try {
@@ -270,11 +390,21 @@ export const startDriverTracking = (driverId, onLocationUpdate, onError) => {
         updateInterval = null
       }
       
+      // ✅ CANCELAR AUTO-DESCONEXIÓN Y MARCAR OFFLINE MANUALMENTE
+      try {
+        await disconnectHandler.cancel()
+        console.log('✅ Auto-desconexión cancelada')
+      } catch (e) {
+        console.log('⚠️ Error cancelando auto-desconexión:', e.message)
+      }
+      
       if (isAuthenticated()) {
         try {
           await update(locationRef, { online: false, lastSeen: Date.now() })
-          console.log('✅ Ubicación limpiada')
-        } catch (e) {}
+          console.log('✅ Ubicación marcada offline')
+        } catch (e) {
+          console.log('⚠️ Error marcando offline:', e.message)
+        }
       }
     },
     pause: () => {
@@ -444,6 +574,10 @@ export const navigateTo = (destLat, destLng) => {
 export default {
   checkGeolocationPermission,
   getCurrentPosition,
+  setupAutoDisconnect,
+  cancelAutoDisconnect,
+  setDriverOffline,
+  setDriverOnlineRTDB,
   startDriverTracking,
   stopDriverTracking,
   subscribeToDriverLocation,
