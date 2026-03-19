@@ -16,14 +16,16 @@ import {
   CircularProgress,
   Fade,
   Divider,
-  IconButton
+  IconButton,
+  Alert
 } from '@mui/material'
 import {
   Close as CloseIcon,
   Send as SendIcon,
   Check as CheckIcon,
   TwoWheeler as BikeIcon,
-  EmojiEvents as TrophyIcon
+  EmojiEvents as TrophyIcon,
+  Warning as WarningIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import StarRating from './StarRating'
@@ -33,7 +35,7 @@ import { submitRating, RATING_TAGS, getRatingLabel } from '../../services/rating
  * RatingModal - Modal para calificar un servicio completado
  * 
  * @param {boolean} open - Si el modal está abierto
- * @param {function} onClose - Callback para cerrar
+ * @param {function} onClose - Callback para cerrar (SIEMPRE disponible)
  * @param {object} service - Datos del servicio
  * @param {object} driver - Datos del repartidor
  * @param {string} restaurantId - ID del restaurante
@@ -54,6 +56,7 @@ export default function RatingModal({
   const [selectedTags, setSelectedTags] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [validationError, setValidationError] = useState(null)
 
   // Resetear estado cuando se abre el modal
   useEffect(() => {
@@ -62,8 +65,23 @@ export default function RatingModal({
       setComment('')
       setSelectedTags([])
       setSubmitted(false)
+      setValidationError(null)
+      
+      // Validar datos al abrir
+      console.log('📋 RatingModal abierto con:')
+      console.log('  - service:', service)
+      console.log('  - driver:', driver)
+      console.log('  - restaurantId:', restaurantId)
+      
+      if (!service?.id) {
+        setValidationError('No se encontró información del servicio')
+      } else if (!driver?.id) {
+        setValidationError('No se encontró información del repartidor')
+      } else if (!restaurantId) {
+        setValidationError('No se encontró información del restaurante')
+      }
     }
-  }, [open])
+  }, [open, service, driver, restaurantId])
 
   // Tags disponibles según el rating
   const availableTags = rating >= 3 
@@ -83,44 +101,61 @@ export default function RatingModal({
 
   // Enviar calificación
   const handleSubmit = async () => {
+    // Validaciones
     if (rating === 0) {
       enqueueSnackbar('Por favor selecciona una calificación', { variant: 'warning' })
       return
     }
 
-    if (!service?.id || !driver?.id || !restaurantId) {
-      enqueueSnackbar('Faltan datos para calificar', { variant: 'error' })
+    // Validar datos mínimos
+    if (!service?.id) {
+      enqueueSnackbar('Error: No se encontró el ID del servicio', { variant: 'error' })
+      return
+    }
+    
+    if (!driver?.id) {
+      enqueueSnackbar('Error: No se encontró el ID del repartidor', { variant: 'error' })
+      return
+    }
+    
+    if (!restaurantId) {
+      enqueueSnackbar('Error: No se encontró el ID del restaurante', { variant: 'error' })
       return
     }
 
     setSubmitting(true)
 
-    const result = await submitRating(
-      service.id,
-      restaurantId,
-      driver.id,
-      rating,
-      comment,
-      selectedTags
-    )
+    try {
+      const result = await submitRating(
+        service.id,
+        restaurantId,
+        driver.id,
+        rating,
+        comment,
+        selectedTags
+      )
 
-    setSubmitting(false)
-
-    if (result.success) {
-      setSubmitted(true)
-      enqueueSnackbar('¡Gracias por tu calificación!', { variant: 'success' })
-      
-      // Callback después de 1.5 segundos
-      setTimeout(() => {
-        onRated?.()
-        onClose()
-      }, 1500)
-    } else {
-      enqueueSnackbar(result.error || 'Error al enviar calificación', { variant: 'error' })
+      if (result.success) {
+        setSubmitted(true)
+        enqueueSnackbar('¡Gracias por tu calificación!', { variant: 'success' })
+        
+        // Callback después de 1.5 segundos
+        setTimeout(() => {
+          onRated?.()
+          onClose()
+        }, 1500)
+      } else {
+        enqueueSnackbar(result.error || 'Error al enviar calificación', { variant: 'error' })
+      }
+    } catch (error) {
+      console.error('Error enviando calificación:', error)
+      enqueueSnackbar('Error al enviar calificación', { variant: 'error' })
+    } finally {
+      setSubmitting(false)
     }
   }
 
-  // Cerrar sin calificar
+  // Cerrar sin calificar - SIEMPRE disponible
   const handleSkip = () => {
     onClose()
   }
@@ -128,18 +163,25 @@ export default function RatingModal({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={onClose} // Permite cerrar haciendo clic fuera
       maxWidth="sm"
       fullWidth
+      disableEscapeKeyDown={false}
       PaperProps={{
         sx: { borderRadius: 3 }
       }}
     >
-      {/* Header */}
+      {/* Header - SIEMPRE con botón de cerrar */}
       <DialogTitle sx={{ textAlign: 'center', pb: 0 }}>
         <IconButton
           onClick={onClose}
-          sx={{ position: 'absolute', right: 8, top: 8 }}
+          sx={{ 
+            position: 'absolute', 
+            right: 8, 
+            top: 8,
+            bgcolor: 'grey.100',
+            '&:hover': { bgcolor: 'grey.200' }
+          }}
         >
           <CloseIcon />
         </IconButton>
@@ -154,14 +196,14 @@ export default function RatingModal({
             </Box>
           </Fade>
         ) : (
-          <>
+          <Box sx={{ py: 1 }}>
             <Typography variant="h6" fontWeight="bold" color="primary">
               🎉 ¡Servicio Completado!
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
               ¿Cómo fue tu experiencia?
             </Typography>
-          </>
+          </Box>
         )}
       </DialogTitle>
 
@@ -174,6 +216,20 @@ export default function RatingModal({
               </Typography>
             </Box>
           </Fade>
+        ) : validationError ? (
+          // Mostrar error de validación pero permitir cerrar
+          <Box sx={{ py: 3 }}>
+            <Alert 
+              severity="warning" 
+              icon={<WarningIcon />}
+              sx={{ mb: 2 }}
+            >
+              {validationError}
+            </Alert>
+            <Typography variant="body2" color="text.secondary" textAlign="center">
+              Puedes cerrar este mensaje y volver más tarde.
+            </Typography>
+          </Box>
         ) : (
           <>
             {/* Info del repartidor */}
@@ -204,7 +260,7 @@ export default function RatingModal({
                   {driver?.name || 'Repartidor'}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Servicio: {service?.serviceId}
+                  Servicio: {service?.serviceId || 'N/A'}
                 </Typography>
               </Box>
               {driver?.rating && (
@@ -281,26 +337,29 @@ export default function RatingModal({
         )}
       </DialogContent>
 
-      {/* Actions */}
+      {/* Actions - SIEMPRE visible para poder cerrar */}
       {!submitted && (
         <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
           <Button
             onClick={handleSkip}
             fullWidth
             disabled={submitting}
+            variant="outlined"
           >
-            Omitir
+            {validationError ? 'Cerrar' : 'Omitir'}
           </Button>
-          <Button
-            variant="contained"
-            onClick={handleSubmit}
-            fullWidth
-            disabled={rating === 0 || submitting}
-            startIcon={submitting ? <CircularProgress size={20} /> : <SendIcon />}
-            sx={{ borderRadius: 2 }}
-          >
-            {submitting ? 'Enviando...' : 'Enviar Calificación'}
-          </Button>
+          {!validationError && (
+            <Button
+              variant="contained"
+              onClick={handleSubmit}
+              fullWidth
+              disabled={rating === 0 || submitting}
+              startIcon={submitting ? <CircularProgress size={20} /> : <SendIcon />}
+              sx={{ borderRadius: 2 }}
+            >
+              {submitting ? 'Enviando...' : 'Enviar Calificación'}
+            </Button>
+          )}
         </DialogActions>
       )}
     </Dialog>

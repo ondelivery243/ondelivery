@@ -15,6 +15,7 @@ import {
   Stack,
   IconButton,
   useTheme,
+  useMediaQuery,
   Skeleton
 } from '@mui/material'
 import {
@@ -25,7 +26,9 @@ import {
   LocationOn as LocationIcon,
   ArrowForward as ArrowIcon,
   LightMode as LightModeIcon,
-  DarkMode as DarkModeIcon
+  DarkMode as DarkModeIcon,
+  Login as LoginIcon,
+  PersonAdd as RegisterIcon
 } from '@mui/icons-material'
 import { useStore, formatCurrency, useThemeStore } from '../store/useStore'
 import { getZones } from '../services/firestore'
@@ -34,6 +37,7 @@ import { RIDERY_COLORS } from '../theme/theme'
 export default function Landing() {
   const navigate = useNavigate()
   const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const { user } = useStore()
   const { mode, toggleTheme } = useThemeStore()
   const [zones, setZones] = useState([])
@@ -73,7 +77,7 @@ export default function Landing() {
       icon: <StoreIcon sx={{ fontSize: 32 }} />,
       title: 'Para Restaurantes',
       description: 'Solicita servicios de delivery cuando los necesites. Sin costos fijos mensuales.',
-      color: 'primary',
+      color: 'primary', // Naranja
       benefits: [
         'Solicita repartidores bajo demanda',
         'Paga solo por servicio realizado',
@@ -85,7 +89,7 @@ export default function Landing() {
       icon: <BikeIcon sx={{ fontSize: 32 }} />,
       title: 'Para Repartidores',
       description: 'Trabaja cuando quieras, gana por cada entrega. Flexibilidad total.',
-      color: 'success',
+      color: 'success', // Verde
       benefits: [
         'Horario flexible (online/offline)',
         'Recibe notificaciones instantáneas',
@@ -107,6 +111,33 @@ export default function Landing() {
     }
   ]
 
+  // Función para obtener el color del icono según el tipo
+  const getFeatureColor = (colorType) => {
+    switch (colorType) {
+      case 'primary':
+        // Naranja para Restaurantes
+        return {
+          bg: 'linear-gradient(135deg, #FF6B35 0%, #FF8C5A 100%)',
+          shadow: '0 4px 12px rgba(255, 107, 53, 0.4)'
+        }
+      case 'success':
+        // Verde para Repartidores
+        return {
+          bg: RIDERY_COLORS.gradientPrimary,
+          shadow: RIDERY_COLORS.shadowGreen
+        }
+      case 'secondary':
+      default:
+        return {
+          bg: RIDERY_COLORS.gradientSecondary,
+          shadow: RIDERY_COLORS.shadowYellow
+        }
+    }
+  }
+
+  // Año actual dinámico
+  const currentYear = new Date().getFullYear()
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* Header */}
@@ -120,21 +151,22 @@ export default function Landing() {
           borderColor: mode === 'dark' ? '#333333' : '#E0E0E0'
         }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 1, sm: 2 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 } }}>
             <Box
               component="img"
               src="/logo-192.png"
               alt="ON Delivery"
               sx={{ 
-                width: 40, 
-                height: 40, 
+                width: { xs: 32, sm: 40 }, 
+                height: { xs: 32, sm: 40 }, 
                 borderRadius: 1.5, 
                 boxShadow: '0 4px 12px rgba(0, 200, 83, 0.4)' 
               }}
             />
+            {/* Nombre ON Delivery SIEMPRE visible */}
             <Typography
-              variant="h6"
+              variant={isMobile ? 'subtitle1' : 'h6'}
               fontWeight="bold"
               sx={{
                 background: RIDERY_COLORS.gradientPrimary,
@@ -147,30 +179,57 @@ export default function Landing() {
             </Typography>
           </Box>
 
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={0.5} alignItems="center">
             <IconButton onClick={toggleTheme} sx={{ color: 'text.primary' }}>
               {mode === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
             </IconButton>
-            <Button
-              variant="text"
-              onClick={() => navigate('/login')}
-              sx={{ color: 'text.primary', fontWeight: 600 }}
-            >
-              Iniciar Sesión
-            </Button>
-            <Button
-              variant="contained"
-              onClick={() => navigate('/login')}
-              sx={{
-                background: RIDERY_COLORS.gradientPrimary,
-                boxShadow: RIDERY_COLORS.shadowGreen,
-                '&:hover': {
-                  background: `linear-gradient(135deg, ${RIDERY_COLORS.primaryLight} 0%, ${RIDERY_COLORS.primary} 100%)`,
-                }
-              }}
-            >
-              Registrarse
-            </Button>
+            
+            {/* En móvil solo iconos, en desktop texto completo */}
+            {isMobile ? (
+              <>
+                <IconButton
+                  onClick={() => navigate('/login')}
+                  sx={{ color: 'text.primary' }}
+                  title="Iniciar Sesión"
+                >
+                  <LoginIcon />
+                </IconButton>
+                <IconButton
+                  onClick={() => navigate('/login')}
+                  sx={{
+                    color: 'white',
+                    bgcolor: RIDERY_COLORS.primary,
+                    '&:hover': { bgcolor: RIDERY_COLORS.primaryLight }
+                  }}
+                  title="Registrarse"
+                >
+                  <RegisterIcon />
+                </IconButton>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="text"
+                  onClick={() => navigate('/login')}
+                  sx={{ color: 'text.primary', fontWeight: 600 }}
+                >
+                  Iniciar Sesión
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={() => navigate('/login')}
+                  sx={{
+                    background: RIDERY_COLORS.gradientPrimary,
+                    boxShadow: RIDERY_COLORS.shadowGreen,
+                    '&:hover': {
+                      background: `linear-gradient(135deg, ${RIDERY_COLORS.primaryLight} 0%, ${RIDERY_COLORS.primary} 100%)`,
+                    }
+                  }}
+                >
+                  Registrarse
+                </Button>
+              </>
+            )}
           </Stack>
         </Toolbar>
       </AppBar>
@@ -178,7 +237,7 @@ export default function Landing() {
       {/* Hero Section */}
       <Box
         sx={{
-          pt: { xs: 15, md: 20 },
+          pt: { xs: 12, md: 20 },
           pb: { xs: 8, md: 12 },
           background: mode === 'dark'
             ? `linear-gradient(180deg, ${RIDERY_COLORS.darkPaper} 0%, ${RIDERY_COLORS.darkBg} 100%)`
@@ -191,7 +250,7 @@ export default function Landing() {
               variant="h2"
               fontWeight="bold"
               sx={{
-                fontSize: { xs: '2.5rem', md: '3.5rem' },
+                fontSize: { xs: '2rem', sm: '2.5rem', md: '3.5rem' },
                 mb: 3,
                 color: 'text.primary'
               }}
@@ -213,10 +272,16 @@ export default function Landing() {
             <Typography
               variant="h6"
               color="text.secondary"
-              sx={{ maxWidth: 600, mx: 'auto', mb: 4 }}
+              sx={{ 
+                maxWidth: 600, 
+                mx: 'auto', 
+                mb: 4,
+                fontSize: { xs: '1rem', sm: '1.25rem' },
+                px: { xs: 2, sm: 0 }
+              }}
             >
               Conectamos restaurantes de Maracay con repartidores confiables.
-              Gestiona tus entregas de forma eficiente y en tiempo real.
+              Gestiona tus entregas de forma eficiente y en tiempo real
             </Typography>
 
             <Stack
@@ -233,10 +298,10 @@ export default function Landing() {
                 sx={{ 
                   py: 2, 
                   px: 4,
-                  background: RIDERY_COLORS.gradientPrimary,
-                  boxShadow: RIDERY_COLORS.shadowGreen,
+                  background: 'linear-gradient(135deg, #FF6B35 0%, #FF8C5A 100%)',
+                  boxShadow: '0 4px 12px rgba(255, 107, 53, 0.4)',
                   '&:hover': {
-                    background: `linear-gradient(135deg, ${RIDERY_COLORS.primaryLight} 0%, ${RIDERY_COLORS.primary} 100%)`,
+                    background: 'linear-gradient(135deg, #FF8C5A 0%, #FF6B35 100%)',
                   }
                 }}
               >
@@ -273,75 +338,72 @@ export default function Landing() {
             variant="h3"
             fontWeight="bold"
             align="center"
-            sx={{ mb: 6, color: 'text.primary' }}
+            sx={{ mb: 6, color: 'text.primary', fontSize: { xs: '1.75rem', md: '3rem' } }}
           >
             ¿Cómo funciona ON Delivery?
           </Typography>
 
           <Grid container spacing={4}>
-            {features.map((feature, index) => (
-              <Grid item xs={12} md={4} key={index}>
-                <Card
-                  elevation={0}
-                  sx={{
-                    height: '100%',
-                    border: 1,
-                    borderColor: 'divider',
-                    borderRadius: 3,
-                    transition: 'all 0.3s',
-                    '&:hover': {
-                      boxShadow: mode === 'dark' 
-                        ? '0 8px 30px rgba(0, 200, 83, 0.2)' 
-                        : '0 8px 30px rgba(0, 200, 83, 0.15)',
-                      transform: 'translateY(-4px)',
-                      borderColor: RIDERY_COLORS.primary
-                    }
-                  }}
-                >
-                  <CardContent sx={{ p: 4 }}>
-                    <Box
-                      sx={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: 2,
-                        background: feature.color === 'primary' 
-                          ? RIDERY_COLORS.gradientPrimary 
-                          : feature.color === 'success' 
-                            ? RIDERY_COLORS.gradientPrimary 
-                            : RIDERY_COLORS.gradientSecondary,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        mb: 3,
-                        color: 'white',
-                        boxShadow: feature.color === 'secondary'
-                          ? RIDERY_COLORS.shadowYellow
-                          : RIDERY_COLORS.shadowGreen
-                      }}
-                    >
-                      {feature.icon}
-                    </Box>
+            {features.map((feature, index) => {
+              const colors = getFeatureColor(feature.color)
+              return (
+                <Grid item xs={12} md={4} key={index}>
+                  <Card
+                    elevation={0}
+                    sx={{
+                      height: '100%',
+                      border: 1,
+                      borderColor: 'divider',
+                      borderRadius: 3,
+                      transition: 'all 0.3s',
+                      '&:hover': {
+                        boxShadow: mode === 'dark' 
+                          ? '0 8px 30px rgba(0, 200, 83, 0.2)' 
+                          : '0 8px 30px rgba(0, 200, 83, 0.15)',
+                        transform: 'translateY(-4px)',
+                        borderColor: feature.color === 'primary' ? '#FF6B35' : RIDERY_COLORS.primary
+                      }
+                    }}
+                  >
+                    <CardContent sx={{ p: 4 }}>
+                      <Box
+                        sx={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 2,
+                          background: colors.bg,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mb: 3,
+                          color: 'white',
+                          boxShadow: colors.shadow
+                        }}
+                      >
+                        {feature.icon}
+                      </Box>
 
-                    <Typography variant="h5" fontWeight="bold" gutterBottom color="text.primary">
-                      {feature.title}
-                    </Typography>
+                      <Typography variant="h5" fontWeight="bold" gutterBottom color="text.primary">
+                        {feature.title}
+                      </Typography>
 
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                      {feature.description}
-                    </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                        {feature.description}
+                      </Typography>
 
-                    <Stack spacing={1}>
-                      {feature.benefits.map((benefit, i) => (
-                        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <CheckIcon sx={{ fontSize: 18, color: RIDERY_COLORS.primary }} />
-                          <Typography variant="body2" color="text.primary">{benefit}</Typography>
-                        </Box>
-                      ))}
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
+                      <Stack spacing={1}>
+                        {feature.benefits.map((benefit, i) => (
+                          <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <CheckIcon sx={{ fontSize: 18, color: feature.color === 'primary' ? '#FF6B35' : RIDERY_COLORS.primary }} />
+                            <Typography variant="body2" color="text.primary">{benefit}</Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              )
+            })}
           </Grid>
         </Container>
       </Box>
@@ -350,7 +412,7 @@ export default function Landing() {
       <Box sx={{ py: 8, bgcolor: 'background.default' }}>
         <Container maxWidth="lg">
           <Box sx={{ textAlign: 'center', mb: 6 }}>
-            <Typography variant="h3" fontWeight="bold" gutterBottom color="text.primary">
+            <Typography variant="h3" fontWeight="bold" gutterBottom color="text.primary" sx={{ fontSize: { xs: '1.75rem', md: '3rem' } }}>
               Cobertura en Maracay
             </Typography>
             <Typography variant="body1" color="text.secondary">
@@ -409,7 +471,7 @@ export default function Landing() {
         </Container>
       </Box>
 
-      {/* CTA Section */}
+      {/* CTA Section - Botón con mejor contraste */}
       <Box
         sx={{
           py: 10,
@@ -418,10 +480,23 @@ export default function Landing() {
       >
         <Container maxWidth="md">
           <Box sx={{ textAlign: 'center', color: 'white' }}>
-            <Typography variant="h3" fontWeight="bold" gutterBottom>
+            <Typography 
+              variant="h3" 
+              fontWeight="bold" 
+              gutterBottom
+              sx={{ fontSize: { xs: '1.75rem', md: '3rem' } }}
+            >
               ¿Listo para empezar?
             </Typography>
-            <Typography variant="h6" sx={{ mb: 4, opacity: 0.9 }}>
+            <Typography 
+              variant="h6" 
+              sx={{ 
+                mb: 4, 
+                opacity: 0.95,
+                fontSize: { xs: '1rem', md: '1.25rem' },
+                px: { xs: 2, sm: 0 }
+              }}
+            >
               Únete a la red de delivery más completa de Maracay
             </Typography>
             <Button
@@ -429,15 +504,17 @@ export default function Landing() {
               size="large"
               onClick={() => navigate('/login')}
               sx={{
-                bgcolor: 'white',
-                color: RIDERY_COLORS.primary,
+                bgcolor: '#1E1E1E',
+                color: 'white',
                 py: 2,
                 px: 6,
                 fontWeight: 700,
+                fontSize: { xs: '1rem', md: '1.1rem' },
                 borderRadius: 25,
-                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
+                border: '2px solid white',
                 '&:hover': {
-                  bgcolor: 'grey.100',
+                  bgcolor: '#333333',
                   transform: 'scale(1.02)'
                 }
               }}
@@ -449,7 +526,7 @@ export default function Landing() {
       </Box>
 
       {/* Footer */}
-      <Box sx={{ py: 6, bgcolor: mode === 'dark' ? '#0A0A0A' : '#1E1E1E', color: 'white' }}>
+      <Box sx={{ py: 4, bgcolor: mode === 'dark' ? '#0A0A0A' : '#1E1E1E', color: 'white' }}>
         <Container maxWidth="lg">
           <Box sx={{ textAlign: 'center' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, mb: 2 }}>
@@ -475,9 +552,32 @@ export default function Landing() {
             <Typography variant="body2" color="grey.400" sx={{ mb: 2 }}>
               Plataforma de delivery multiempresa para Maracay, Venezuela
             </Typography>
-            <Typography variant="caption" color="grey.500">
-              © 2024 ON Delivery. Todos los derechos reservados.
-            </Typography>
+            
+            {/* Footer con año dinámico y desarrollador - Dos líneas en móvil */}
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: { xs: 'column', sm: 'row' },
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: { xs: 0.5, sm: 1 }
+            }}>
+              <Typography variant="caption" color="grey.500">
+                © {currentYear} Copyright. Desarrollado por Erick Simosa
+              </Typography>
+              <Typography 
+                variant="caption" 
+                color="grey.500"
+                sx={{ 
+                  display: { xs: 'block', sm: 'inline' },
+                  '&::before': { 
+                    content: { sm: '"-"' },
+                    mx: { sm: 1 } 
+                  }
+                }}
+              >
+                ericksimosa@gmail.com - 0424 3036024
+              </Typography>
+            </Box>
           </Box>
         </Container>
       </Box>

@@ -16,7 +16,8 @@ import {
   useTheme,
   useMediaQuery,
   alpha,
-  Collapse
+  Collapse,
+  LinearProgress
 } from '@mui/material'
 import {
   Search as SearchIcon,
@@ -31,27 +32,52 @@ import {
   Store as StoreIcon,
   AttachMoney as MoneyIcon
 } from '@mui/icons-material'
-import { formatCurrency, formatDate, formatTime } from '../../store/useStore'
-import { subscribeToRestaurantServices } from '../../services/firestore'
+import { formatCurrency, formatDate, formatTime, useRestaurantStore, useStore } from '../../store/useStore'
+import { subscribeToRestaurantServices, getRestaurantByUserId, getRestaurant } from '../../services/firestore'
 
 export default function RestauranteHistorial() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const { restaurantData, setRestaurantData } = useRestaurantStore()
+  const { user } = useStore()
   
   const [services, setServices] = useState([])
   const [filteredServices, setFilteredServices] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('todos')
   const [expandedId, setExpandedId] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  // Cargar servicios
+  // Cargar datos del restaurante
   useEffect(() => {
-    const restaurantId = localStorage.getItem('restaurantId') || 'demo_restaurant'
-    const unsubscribe = subscribeToRestaurantServices(restaurantId, (servicesData) => {
-      setServices(servicesData)
-    })
-    return () => unsubscribe()
-  }, [])
+    const loadRestaurant = async () => {
+      setLoading(true)
+      
+      let restaurant = restaurantData
+      if (!restaurant && user) {
+        if (user.restaurantId) {
+          restaurant = await getRestaurant(user.restaurantId)
+        } else {
+          restaurant = await getRestaurantByUserId(user.uid)
+        }
+        if (restaurant) {
+          setRestaurantData(restaurant)
+        }
+      }
+      
+      if (restaurant?.id) {
+        const unsubscribe = subscribeToRestaurantServices(restaurant.id, (servicesData) => {
+          setServices(servicesData)
+          setLoading(false)
+        })
+        return () => unsubscribe()
+      } else {
+        setLoading(false)
+      }
+    }
+    
+    loadRestaurant()
+  }, [restaurantData, setRestaurantData, user])
 
   // Filtrar servicios
   useEffect(() => {
@@ -100,6 +126,31 @@ export default function RestauranteHistorial() {
     { value: 'en_camino', label: 'En camino', count: services.filter(s => s.status === 'en_camino' || s.status === 'asignado').length },
     { value: 'cancelado', label: 'Cancelados', count: services.filter(s => s.status === 'cancelado').length }
   ]
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <LinearProgress />
+        <Typography variant="body2" color="text.secondary">Cargando historial...</Typography>
+      </Box>
+    )
+  }
+
+  if (!restaurantData) {
+    return (
+      <Card sx={{ borderRadius: 2 }}>
+        <CardContent sx={{ p: 4, textAlign: 'center' }}>
+          <PackageIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            No hay datos del restaurante
+          </Typography>
+          <Typography variant="body2" color="text.disabled">
+            Si acabas de registrarte, espera a que un administrador active tu cuenta.
+          </Typography>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

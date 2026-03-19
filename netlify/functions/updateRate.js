@@ -1,8 +1,8 @@
 // netlify/functions/updateRate.js
 import admin from 'firebase-admin';
 
-const BCV_API_URL = 'https://bcv.justcarlux.dev/api/v1/rates';
-const TIMEOUT_MS = 8000;
+const ALCAMBIO_API_URL = 'https://api-alcambio.onrender.com/tasas';
+const TIMEOUT_MS = 30000; // 30 segundos
 
 let db = null;
 
@@ -43,18 +43,26 @@ export const handler = async (event) => {
     const docSnap = await configRef.get();
     const currentRate = docSnap.exists ? (docSnap.data().exchangeRate || 0) : 0;
 
+    console.log('🔄 Obteniendo tasa desde API...');
+    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const response = await fetch(BCV_API_URL, { signal: controller.signal });
+    const response = await fetch(ALCAMBIO_API_URL, { signal: controller.signal });
     clearTimeout(timeoutId);
 
     if (!response.ok) throw new Error(`Error API: ${response.status}`);
 
     const data = await response.json();
-    if (!data?.rates?.usd || typeof data.rates.usd !== 'number') throw new Error('Formato inesperado');
+    console.log('📦 Respuesta API:', JSON.stringify(data));
+    
+    // La API devuelve: { tasas: { dolar: 451.50, euro: 520.64, usdt: 666.19 } }
+    const newRate = data?.tasas?.dolar;
+    
+    if (!newRate || typeof newRate !== 'number') {
+      throw new Error(`Formato inesperado - no se encontro dolar. Respuesta: ${JSON.stringify(data)}`);
+    }
 
-    const newRate = data.rates.usd;
     if (newRate < 1 || newRate > 1000) return { 
       statusCode: 200, 
       body: JSON.stringify({ success: false, message: 'Tasa fuera de rango' }), 
@@ -76,8 +84,10 @@ export const handler = async (event) => {
       exchangeRate: newRate,
       lastUpdate: admin.firestore.FieldValue.serverTimestamp(),
       previousRate: currentRate,
-      source: 'bcv.justcarlux.dev'
+      source: 'api-alcambio.onrender.com'
     }, { merge: true });
+
+    console.log('✅ Tasa actualizada:', newRate);
 
     return { 
       statusCode: 200, 
@@ -86,9 +96,10 @@ export const handler = async (event) => {
     };
 
   } catch (error) {
+    console.error('❌ Error:', error.message);
     if (error.name === 'AbortError') return { 
       statusCode: 504, 
-      body: JSON.stringify({ error: 'Timeout' }), 
+      body: JSON.stringify({ error: 'Timeout - la API tardó demasiado' }), 
       headers: securityHeaders 
     };
     return { 

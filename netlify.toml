@@ -7,6 +7,11 @@
   NODE_VERSION = "20"
   NPM_FLAGS = "--include=dev"
 
+# Configuración de funciones
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"
+
 # Redirects para SPA (Single Page Application)
 [[redirects]]
   from = "/*"
@@ -40,3 +45,11 @@
 # Contexto de deploy preview
 [context.deploy-preview.environment]
   NODE_ENV = "development"
+
+# Configuración para Netlify Dev local
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+  autoLaunch = false
+  functionsTimeout = 30

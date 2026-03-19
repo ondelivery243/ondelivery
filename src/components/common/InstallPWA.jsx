@@ -80,7 +80,7 @@ export default function InstallPWA() {
     setShowIosInstructions(false)
   }
 
-  // Android/Desktop prompt
+  // Android/Desktop prompt - Simplificado
   if (showPrompt && deferredPrompt) {
     return (
       <Snackbar
@@ -109,14 +109,9 @@ export default function InstallPWA() {
             alt="ON Delivery"
             sx={{ width: 48, height: 48, borderRadius: 2 }}
           />
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2" fontWeight="bold">
-              Instalar ON Delivery
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Acceso rápido desde tu pantalla de inicio
-            </Typography>
-          </Box>
+          <Typography variant="subtitle2" fontWeight="bold">
+            Instalar ON Delivery
+          </Typography>
           <Button
             variant="contained"
             size="small"
@@ -133,7 +128,7 @@ export default function InstallPWA() {
     )
   }
 
-  // iOS instructions
+  // iOS instructions - Simplificado
   if (showIosInstructions && isIos()) {
     return (
       <Snackbar
@@ -157,15 +152,12 @@ export default function InstallPWA() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
             <IosIcon color="primary" />
             <Typography variant="subtitle2" fontWeight="bold">
-              Instalar en iPhone/iPad
+              Instalar ON Delivery
             </Typography>
             <IconButton size="small" onClick={handleClose} sx={{ ml: 'auto' }}>
               <CloseIcon fontSize="small" />
             </IconButton>
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Para instalar la app:
-          </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             <Typography variant="body2" color="text.secondary">1.</Typography>
             <Typography variant="body2">Toca el botón</Typography>

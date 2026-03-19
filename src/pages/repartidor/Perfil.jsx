@@ -47,6 +47,7 @@ import {
 import { updatePassword } from 'firebase/auth'
 import { auth } from '../../config/firebase'
 import { RatingWidget } from '../../components/rating'
+import { RIDERY_COLORS } from '../../theme/theme'
 
 export default function RepartidorPerfil() {
   const theme = useTheme()
@@ -140,6 +141,9 @@ export default function RepartidorPerfil() {
     if (type === 'bicicleta') return '🚲'
     return '🏍️'
   }
+
+  // Año actual dinámico
+  const currentYear = new Date().getFullYear()
 
   if (loading) {
     return (
@@ -430,15 +434,35 @@ export default function RepartidorPerfil() {
         </CardContent>
       </Card>
 
-      {/* App Info */}
-      <Paper sx={{ p: 2, borderRadius: 2, bgcolor: alpha(theme.palette.primary.main, 0.05) }}>
-        <Typography variant="caption" color="text.secondary" align="center" display="block">
-          ON Delivery v1.0.0
+      {/* Footer Info */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
         </Typography>
-        <Typography variant="caption" color="text.disabled" align="center" display="block">
-          © 2024 ON Delivery - Maracay, Venezuela
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
         </Typography>
-      </Paper>
+      </Box>
 
       {/* Edit Field Dialog */}
       <Dialog

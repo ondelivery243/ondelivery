@@ -1,140 +1,266 @@
 // src/services/locationService.js
 // Servicio de rastreo GPS en tiempo real para repartidores
-import { ref, set, onValue, off, remove, update, push, serverTimestamp } from 'firebase/database'
-import { doc, updateDoc, getDoc } from 'firebase/firestore'
-import { db, rtdb } from '../config/firebase'
+import { ref, set, onValue, off, remove, update, push } from 'firebase/database'
+import { rtdb, auth } from '../config/firebase'
 
 // Colecciones en Realtime Database
 const DRIVERS_LOCATIONS = 'drivers_locations'
 const SERVICE_TRACKING = 'service_tracking'
 
 // ============================================
-// TRACKING DE UBICACIÓN DEL REPARTIDOR
+// VERIFICAR PERMISOS DE GEOLOCALIZACIÓN
 // ============================================
 
-/**
- * Iniciar el seguimiento de ubicación del repartidor
- * @param {string} driverId - ID del repartidor
- * @param {Function} onLocationUpdate - Callback cuando se actualiza la ubicación
- * @param {Function} onError - Callback para errores
- * @returns {Object} - Objeto con funciones de control
- */
+export const checkGeolocationPermission = async () => {
+  console.log('🔍 Verificando permisos de geolocalización...')
+  
+  if (!('geolocation' in navigator)) {
+    console.error('❌ Geolocalización no soportada')
+    return { granted: false, reason: 'Geolocalización no soportada en este navegador' }
+  }
+
+  if (!('permissions' in navigator)) {
+    console.log('⚠️ API de permisos no disponible, intentando directamente...')
+    return { granted: true, reason: 'Intentando obtener ubicación...' }
+  }
+
+  try {
+    const result = await navigator.permissions.query({ name: 'geolocation' })
+    console.log('📋 Estado del permiso:', result.state)
+    
+    if (result.state === 'granted') {
+      return { granted: true, reason: 'Permiso concedido' }
+    } else if (result.state === 'prompt') {
+      return { granted: null, reason: 'Se solicitará permiso' }
+    } else {
+      return { granted: false, reason: 'Permiso denegado. Habilita la ubicación en la configuración del navegador.' }
+    }
+  } catch (e) {
+    console.log('⚠️ Error verificando permisos:', e.message)
+    return { granted: true, reason: 'Intentando obtener ubicación...' }
+  }
+}
+
+// ============================================
+// OBTENER UBICACIÓN (una vez) - MEJORADO
+// ============================================
+
+export const getCurrentPosition = (options = {}) => {
+  return new Promise((resolve, reject) => {
+    console.log('📍 getCurrentPosition iniciado...')
+    
+    if (!('geolocation' in navigator)) {
+      console.error('❌ Geolocalización no soportada')
+      reject(new Error('Geolocalización no soportada en este navegador'))
+      return
+    }
+
+    const defaultOptions = {
+      enableHighAccuracy: false,
+      timeout: 10000,  // 10 segundos
+      maximumAge: 300000  // 5 minutos de caché
+    }
+
+    const finalOptions = { ...defaultOptions, ...options }
+    console.log('📍 Opciones:', finalOptions)
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        console.log('✅ Ubicación obtenida:', {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        })
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          heading: position.coords.heading,
+          speed: position.coords.speed,
+          timestamp: Date.now()
+        })
+      },
+      (error) => {
+        console.error('❌ Error de geolocalización:', error.code, error.message)
+        let message = 'Error desconocido'
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            message = 'PERMISSION_DENIED'
+            break
+          case error.POSITION_UNAVAILABLE:
+            message = 'POSITION_UNAVAILABLE'
+            break
+          case error.TIMEOUT:
+            message = 'TIMEOUT'
+            break
+        }
+        reject(new Error(message))
+      },
+      finalOptions
+    )
+  })
+}
+
+// ============================================
+// TRACKING CONTINUO - MEJORADO
+// ============================================
+
 export const startDriverTracking = (driverId, onLocationUpdate, onError) => {
+  console.log('🚀 Iniciando tracking para driver:', driverId)
+  
   let watchId = null
   let lastPosition = null
   let updateInterval = null
+  let isStopped = false
+  let retryCount = 0
+  const MAX_RETRIES = 5
   
-  // Referencia en Realtime Database
   const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
   
-  // Configuración de geolocalización
-  const geoOptions = {
-    enableHighAccuracy: true,
-    timeout: 10000,
-    maximumAge: 5000
-  }
+  const isAuthenticated = () => !!auth.currentUser
 
-  // Función para actualizar ubicación en Firebase
   const updateLocation = async (position) => {
-    const { latitude, longitude, heading, speed, accuracy } = position.coords
-    const timestamp = Date.now()
+    if (isStopped || !isAuthenticated()) {
+      console.log('⏭️ Skip update - stopped or not authenticated')
+      return
+    }
+
+    retryCount = 0 // Resetear contador al tener éxito
     
-    // Solo actualizar si la posición cambió significativamente (más de 5 metros)
+    const { latitude, longitude, heading, speed, accuracy } = position.coords || position
+    const timestamp = Date.now()
+
+    // Solo actualizar si cambió significativamente
     if (lastPosition) {
       const distance = calculateDistance(
-        lastPosition.latitude,
-        lastPosition.longitude,
-        latitude,
-        longitude
+        lastPosition.latitude, lastPosition.longitude,
+        latitude, longitude
       )
-      if (distance < 0.005 && accuracy > 50) { // Menos de 5m y baja precisión
+      if (distance < 0.010 && accuracy > 100) {
+        console.log('⏭️ Skip update - misma posición')
         return
       }
     }
 
     lastPosition = { latitude, longitude }
+    console.log('📍 Actualizando ubicación:', { latitude, longitude, accuracy })
 
     const locationData = {
       latitude,
       longitude,
       heading: heading || 0,
       speed: speed || 0,
-      accuracy,
+      accuracy: accuracy || 0,
       timestamp,
       lastUpdate: new Date().toISOString()
     }
 
     try {
       await set(locationRef, locationData)
-      if (onLocationUpdate) {
+      console.log('✅ Ubicación guardada en Firebase')
+      if (onLocationUpdate && !isStopped) {
         onLocationUpdate(locationData)
       }
     } catch (error) {
-      console.error('Error actualizando ubicación:', error)
-      if (onError) onError(error)
+      console.error('❌ Error guardando ubicación:', error.message)
     }
   }
 
-  // Manejar errores de geolocalización
-  const handleGeoError = (error) => {
-    console.error('Error de geolocalización:', error)
-    let errorMessage = 'Error desconocido'
+  const handleError = (error) => {
+    if (isStopped) return
     
-    switch (error.code) {
-      case error.PERMISSION_DENIED:
-        errorMessage = 'Permiso de ubicación denegado'
-        break
-      case error.POSITION_UNAVAILABLE:
-        errorMessage = 'Ubicación no disponible'
-        break
-      case error.TIMEOUT:
-        errorMessage = 'Tiempo de espera agotado'
-        break
+    retryCount++
+    console.log(`⚠️ Error GPS, reintento ${retryCount} de ${MAX_RETRIES}:`, error?.message || error)
+    
+    if (retryCount < MAX_RETRIES) {
+      // Intentar con opciones aún más permisivas
+      setTimeout(() => {
+        if (!isStopped) {
+          console.log('🔄 Reintentando con baja precisión...')
+          navigator.geolocation.getCurrentPosition(
+            updateLocation,
+            (err) => {
+              console.log('❌ Reintento fallido:', err.message)
+              if (retryCount >= MAX_RETRIES - 1 && onError) {
+                onError(new Error('No se pudo obtener ubicación después de varios intentos'))
+              }
+            },
+            {
+              enableHighAccuracy: false,
+              timeout: 30000,
+              maximumAge: 600000  // 10 minutos
+            }
+          )
+        }
+      }, 2000)
+    } else if (onError) {
+      if (error?.code === 1 || error?.message === 'PERMISSION_DENIED') {
+        onError(new Error('Permiso de ubicación denegado. Habilita el GPS en tu navegador.'))
+      } else if (error?.code === 2 || error?.message === 'POSITION_UNAVAILABLE') {
+        onError(new Error('Ubicación no disponible. Verifica que el GPS del dispositivo esté activado.'))
+      } else if (error?.code === 3 || error?.message === 'TIMEOUT') {
+        onError(new Error('El GPS está tardando demasiado. Intenta salir al exterior.'))
+      } else {
+        onError(new Error('Error de GPS desconocido'))
+      }
     }
-    
-    if (onError) onError(new Error(errorMessage))
   }
 
-  // Iniciar watch de posición
-  if ('geolocation' in navigator) {
-    watchId = navigator.geolocation.watchPosition(
-      updateLocation,
-      handleGeoError,
-      geoOptions
+  // INICIAR: Intentar obtener ubicación inmediatamente
+  const startWatching = () => {
+    if (isStopped) return
+
+    console.log('🎯 Iniciando obtención de ubicación...')
+    
+    // Primero obtener ubicación única con opciones permisivas
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        console.log('✅ Primera ubicación obtenida')
+        updateLocation(pos)
+        
+        // Luego iniciar watch continuo
+        console.log('👁️ Iniciando watchPosition continuo...')
+        watchId = navigator.geolocation.watchPosition(
+          updateLocation,
+          handleError,
+          {
+            enableHighAccuracy: true,
+            timeout: 30000,
+            maximumAge: 0
+          }
+        )
+      },
+      handleError,
+      {
+        enableHighAccuracy: false,  // Baja precisión primero para obtener algo
+        timeout: 15000,
+        maximumAge: 300000  // Aceptar caché de hasta 5 minutos
+      }
     )
-
-    // Backup: actualizar cada 10 segundos si no hay cambios
-    updateInterval = setInterval(() => {
-      navigator.geolocation.getCurrentPosition(
-        updateLocation,
-        handleGeoError,
-        geoOptions
-      )
-    }, 10000)
-  } else {
-    if (onError) onError(new Error('Geolocalización no soportada'))
   }
 
-  // Retornar funciones de control
+  startWatching()
+
+  // Intervalo de respaldo cada 20 segundos
+  updateInterval = setInterval(() => {
+    if (isStopped || !isAuthenticated()) {
+      clearInterval(updateInterval)
+      return
+    }
+    
+    console.log('⏰ Respaldo: obteniendo ubicación...')
+    navigator.geolocation.getCurrentPosition(
+      updateLocation,
+      () => {},
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    )
+  }, 20000)
+
   return {
     stop: async () => {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId)
-      }
-      if (updateInterval) {
-        clearInterval(updateInterval)
-      }
-      // Marcar como offline en la base de datos
-      try {
-        await update(locationRef, {
-          online: false,
-          lastSeen: Date.now()
-        })
-      } catch (e) {
-        console.error('Error marcando offline:', e)
-      }
-    },
-    pause: async () => {
+      console.log('🛑 Deteniendo tracking...')
+      isStopped = true
+      
       if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId)
         watchId = null
@@ -143,52 +269,36 @@ export const startDriverTracking = (driverId, onLocationUpdate, onError) => {
         clearInterval(updateInterval)
         updateInterval = null
       }
+      
+      if (isAuthenticated()) {
+        try {
+          await update(locationRef, { online: false, lastSeen: Date.now() })
+          console.log('✅ Ubicación limpiada')
+        } catch (e) {}
+      }
     },
-    resume: () => {
-      if (watchId === null) {
-        watchId = navigator.geolocation.watchPosition(
-          updateLocation,
-          handleGeoError,
-          geoOptions
-        )
+    pause: () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId)
+        watchId = null
       }
-      if (!updateInterval) {
-        updateInterval = setInterval(() => {
-          navigator.geolocation.getCurrentPosition(
-            updateLocation,
-            handleGeoError,
-            geoOptions
-          )
-        }, 10000)
-      }
-    }
+    },
+    resume: startWatching
   }
 }
 
-/**
- * Detener el seguimiento y limpiar la ubicación
- * @param {string} driverId - ID del repartidor
- */
 export const stopDriverTracking = async (driverId) => {
+  if (!auth.currentUser) return
   const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
   try {
     await remove(locationRef)
-    console.log('Tracking detenido para:', driverId)
-  } catch (error) {
-    console.error('Error deteniendo tracking:', error)
-  }
+  } catch (e) {}
 }
 
 // ============================================
-// ESCUCHAR UBICACIÓN DE REPARTIDOR (Para restaurantes/admin)
+// SUSCRIPCIONES
 // ============================================
 
-/**
- * Suscribirse a los cambios de ubicación de un repartidor
- * @param {string} driverId - ID del repartidor
- * @param {Function} onLocationChange - Callback con la nueva ubicación
- * @returns {Function} - Función para cancelar la suscripción
- */
 export const subscribeToDriverLocation = (driverId, onLocationChange) => {
   const locationRef = ref(rtdb, `${DRIVERS_LOCATIONS}/${driverId}`)
   
@@ -198,24 +308,16 @@ export const subscribeToDriverLocation = (driverId, onLocationChange) => {
       onLocationChange({
         driverId,
         ...data,
-        isValid: Date.now() - data.timestamp < 60000 // Menos de 1 minuto
+        isValid: Date.now() - data.timestamp < 60000
       })
     } else {
       onLocationChange(null)
     }
-  }, (error) => {
-    console.error('Error escuchando ubicación:', error)
-    onLocationChange(null)
-  })
+  }, () => onLocationChange(null))
 
   return () => off(locationRef, 'value', unsubscribe)
 }
 
-/**
- * Suscribirse a las ubicaciones de todos los repartidores online
- * @param {Function} onLocationsChange - Callback con todas las ubicaciones
- * @returns {Function} - Función para cancelar la suscripción
- */
 export const subscribeToAllDriversLocations = (onLocationsChange) => {
   const locationsRef = ref(rtdb, DRIVERS_LOCATIONS)
   
@@ -224,146 +326,80 @@ export const subscribeToAllDriversLocations = (onLocationsChange) => {
     if (snapshot.exists()) {
       snapshot.forEach((child) => {
         const data = child.val()
-        // Solo incluir ubicaciones actualizadas en los últimos 2 minutos
         if (Date.now() - data.timestamp < 120000) {
-          locations.push({
-            driverId: child.key,
-            ...data
-          })
+          locations.push({ driverId: child.key, ...data })
         }
       })
     }
     onLocationsChange(locations)
-  }, (error) => {
-    console.error('Error escuchando ubicaciones:', error)
-    onLocationsChange([])
-  })
+  }, () => onLocationsChange([]))
 
   return () => off(locationsRef, 'value', unsubscribe)
 }
 
 // ============================================
-// TRACKING DE SERVICIO ESPECÍFICO
+// TRACKING DE SERVICIO
 // ============================================
 
-/**
- * Iniciar tracking para un servicio específico
- * @param {string} serviceId - ID del servicio
- * @param {string} driverId - ID del repartidor
- * @param {Object} initialData - Datos iniciales del servicio
- */
 export const startServiceTracking = async (serviceId, driverId, initialData) => {
+  if (!auth.currentUser) return
   const trackingRef = ref(rtdb, `${SERVICE_TRACKING}/${serviceId}`)
-  
-  await set(trackingRef, {
-    driverId,
-    serviceId,
-    restaurantId: initialData.restaurantId,
-    restaurantLocation: initialData.restaurantLocation || null,
-    deliveryLocation: initialData.deliveryLocation || null,
-    status: 'in_progress',
-    startedAt: Date.now(),
-    route: [],
-    estimatedArrival: null
-  })
+  try {
+    await set(trackingRef, {
+      driverId, serviceId,
+      restaurantId: initialData.restaurantId,
+      status: 'in_progress',
+      startedAt: Date.now()
+    })
+  } catch (e) {}
 }
 
-/**
- * Actualizar la ruta del servicio
- * @param {string} serviceId - ID del servicio
- * @param {Object} location - Ubicación actual {lat, lng}
- */
 export const updateServiceRoute = async (serviceId, location) => {
-  const routeRef = ref(rtdb, `${SERVICE_TRACKING}/${serviceId}/route`)
-  const newPointRef = push(routeRef)
-  
-  await set(newPointRef, {
-    latitude: location.latitude,
-    longitude: location.longitude,
-    timestamp: Date.now()
-  })
-
-  // Mantener solo los últimos 100 puntos para no sobrecargar
-  // Esto se puede hacer con una Cloud Function o límite en el cliente
+  if (!auth.currentUser) return
+  try {
+    const routeRef = ref(rtdb, `${SERVICE_TRACKING}/${serviceId}/route`)
+    const newPointRef = push(routeRef)
+    await set(newPointRef, {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      timestamp: Date.now()
+    })
+  } catch (e) {}
 }
 
-/**
- * Suscribirse al tracking de un servicio
- * @param {string} serviceId - ID del servicio
- * @param {Function} onTrackingUpdate - Callback con actualizaciones
- * @returns {Function} - Función para cancelar
- */
 export const subscribeToServiceTracking = (serviceId, onTrackingUpdate) => {
   const trackingRef = ref(rtdb, `${SERVICE_TRACKING}/${serviceId}`)
-  
-  const unsubscribe = onValue(trackingRef, (snapshot) => {
-    if (snapshot.exists()) {
-      onTrackingUpdate(snapshot.val())
-    } else {
-      onTrackingUpdate(null)
-    }
-  })
-
+  const unsubscribe = onValue(trackingRef, 
+    (snapshot) => onTrackingUpdate(snapshot.exists() ? snapshot.val() : null),
+    () => onTrackingUpdate(null)
+  )
   return () => off(trackingRef, 'value', unsubscribe)
 }
 
-/**
- * Finalizar tracking de servicio
- * @param {string} serviceId - ID del servicio
- */
 export const endServiceTracking = async (serviceId) => {
-  const trackingRef = ref(rtdb, `${SERVICE_TRACKING}/${serviceId}`)
-  
-  // Guardar en Firestore antes de eliminar (historial)
-  // Opcional: mover a una colección de historial
-  
-  await remove(trackingRef)
+  if (!auth.currentUser) return
+  try {
+    await remove(ref(rtdb, `${SERVICE_TRACKING}/${serviceId}`))
+  } catch (e) {}
 }
 
 // ============================================
-// UTILIDADES DE GEOLOCALIZACIÓN
+// UTILIDADES
 // ============================================
 
-/**
- * Calcular distancia entre dos puntos (Haversine)
- * @param {number} lat1 - Latitud punto 1
- * @param {number} lon1 - Longitud punto 1
- * @param {number} lat2 - Latitud punto 2
- * @param {number} lon2 - Longitud punto 2
- * @returns {number} - Distancia en kilómetros
- */
 export const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371 // Radio de la Tierra en km
-  const dLat = toRad(lat2 - lat1)
-  const dLon = toRad(lon2 - lon1)
-  const a = 
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return R * c
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon/2) * Math.sin(dLon/2)
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 }
 
-const toRad = (deg) => deg * (Math.PI / 180)
-
-/**
- * Calcular tiempo estimado de llegada
- * @param {Object} currentLocation - {latitude, longitude, speed}
- * @param {Object} destination - {latitude, longitude}
- * @returns {Object} - {distance: km, time: minutos}
- */
-export const calculateETA = (currentLocation, destination) => {
-  const distance = calculateDistance(
-    currentLocation.latitude,
-    currentLocation.longitude,
-    destination.latitude,
-    destination.longitude
-  )
-  
-  // Velocidad promedio en ciudad: 25 km/h
-  const avgSpeedKmh = 25
-  const timeMinutes = (distance / avgSpeedKmh) * 60
-  
+export const calculateETA = (current, destination) => {
+  const distance = calculateDistance(current.latitude, current.longitude, destination.latitude, destination.longitude)
+  const timeMinutes = (distance / 25) * 60
   return {
     distance: distance.toFixed(2),
     time: Math.ceil(timeMinutes),
@@ -371,81 +407,43 @@ export const calculateETA = (currentLocation, destination) => {
   }
 }
 
-/**
- * Geocodificar dirección a coordenadas
- * @param {string} address - Dirección a geocodificar
- * @returns {Promise<Object>} - {latitude, longitude}
- */
 export const geocodeAddress = async (address) => {
   try {
-    const response = await fetch(
-      `/.netlify/functions/geocode?address=${encodeURIComponent(address)}`
-    )
+    const response = await fetch(`/.netlify/functions/geocode?address=${encodeURIComponent(address)}`)
     const data = await response.json()
-    
     if (data.success && data.location) {
-      return {
-        latitude: data.location.lat,
-        longitude: data.location.lng
-      }
+      return { latitude: data.location.lat, longitude: data.location.lng }
     }
     return null
-  } catch (error) {
-    console.error('Error geocodificando:', error)
+  } catch (e) {
     return null
   }
 }
 
-/**
- * Obtener dirección desde coordenadas (reverse geocoding)
- * @param {number} latitude 
- * @param {number} longitude 
- * @returns {Promise<string>} - Dirección formateada
- */
-export const reverseGeocode = async (latitude, longitude) => {
+export const reverseGeocode = async (lat, lng) => {
   try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-    )
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`)
     const data = await response.json()
-    
-    if (data && data.display_name) {
-      return data.display_name
-    }
-    return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-  } catch (error) {
-    console.error('Error en reverse geocoding:', error)
-    return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+    return data?.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+  } catch (e) {
+    return `${lat.toFixed(6)}, ${lng.toFixed(6)}`
   }
 }
 
-/**
- * Abrir en Google Maps
- * @param {number} latitude 
- * @param {number} longitude 
- * @param {string} label - Etiqueta opcional
- */
-export const openInGoogleMaps = (latitude, longitude, label = '') => {
+export const openInGoogleMaps = (lat, lng, label = '') => {
   const url = label
-    ? `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&query_place_id=${encodeURIComponent(label)}`
-    : `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`
+    ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}&query_place_id=${encodeURIComponent(label)}`
+    : `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
   window.open(url, '_blank')
 }
 
-/**
- * Abrir navegación en Google Maps
- * @param {number} destLat 
- * @param {number} destLng 
- */
 export const navigateTo = (destLat, destLng) => {
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`
-  window.open(url, '_blank')
+  window.open(`https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`, '_blank')
 }
 
-// ============================================
-// EXPORTAR TODO
-// ============================================
 export default {
+  checkGeolocationPermission,
+  getCurrentPosition,
   startDriverTracking,
   stopDriverTracking,
   subscribeToDriverLocation,

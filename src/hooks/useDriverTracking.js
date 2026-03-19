@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSnackbar } from 'notistack'
 import { 
+  checkGeolocationPermission,
+  getCurrentPosition,
   startDriverTracking, 
   stopDriverTracking,
   startServiceTracking,
@@ -13,9 +15,6 @@ import {
 
 /**
  * Hook para manejar el tracking GPS del repartidor
- * @param {Object} driverData - Datos del conductor {id, name}
- * @param {Object} currentService - Servicio activo actual
- * @returns {Object} - Estado y funciones de control
  */
 export const useDriverTracking = (driverData, currentService = null) => {
   const { enqueueSnackbar } = useSnackbar()
@@ -24,92 +23,203 @@ export const useDriverTracking = (driverData, currentService = null) => {
   const [isTracking, setIsTracking] = useState(false)
   const [currentLocation, setCurrentLocation] = useState(null)
   const [error, setError] = useState(null)
+  const [permissionStatus, setPermissionStatus] = useState(null)
   const [isInitialized, setIsInitialized] = useState(false)
   
   // Refs
   const trackingControl = useRef(null)
   const lastServiceId = useRef(null)
+  const isMounted = useRef(true)
+  const locationRetryRef = useRef(null)
 
-  // Iniciar tracking cuando el conductor se pone online
+  // ✅ Verificar permisos al montar
+  useEffect(() => {
+    const checkPermission = async () => {
+      console.log('🔍 useDriverTracking: Verificando permisos...')
+      const result = await checkGeolocationPermission()
+      console.log('📋 Resultado permisos:', result)
+      if (isMounted.current) {
+        setPermissionStatus(result)
+        if (result.granted === false) {
+          setError(result.reason)
+        }
+      }
+    }
+    checkPermission()
+  }, [])
+
+  // ✅ Iniciar tracking - CORREGIDO
   const startTracking = useCallback(async () => {
+    console.log('🚀 startTracking llamado, driverData:', driverData?.id)
+    
     if (!driverData?.id) {
-      setError('No hay datos del conductor')
-      return
+      const err = new Error('No hay datos del conductor')
+      console.error('❌', err.message)
+      setError(err.message)
+      return Promise.reject(err)
+    }
+
+    // ✅ IMPORTANTE: Resetear isMounted a true
+    isMounted.current = true
+    console.log('✅ isMounted reseteado a true')
+
+    // Verificar permisos primero
+    console.log('🔍 Verificando permisos antes de iniciar...')
+    const permCheck = await checkGeolocationPermission()
+    console.log('📋 Permiso:', permCheck)
+    
+    if (permCheck.granted === false) {
+      setError(permCheck.reason)
+      enqueueSnackbar(permCheck.reason, { variant: 'error' })
+      return Promise.reject(new Error(permCheck.reason))
     }
 
     setError(null)
+    setIsTracking(true)
+    setIsInitialized(true)
     
+    // ✅ INTENTAR OBTENER UBICACIÓN INMEDIATAMENTE
+    console.log('📍 Intentando obtener ubicación inicial...')
     try {
-      // Iniciar tracking de ubicación
-      trackingControl.current = startDriverTracking(
-        driverData.id,
-        (location) => {
-          setCurrentLocation(location)
-          
-          // Si hay un servicio activo, actualizar la ruta
-          if (currentService?.id && currentService.id !== lastServiceId.current) {
-            updateServiceRoute(currentService.id, location)
-          }
-        },
-        (err) => {
-          setError(err.message)
-          enqueueSnackbar(`Error de ubicación: ${err.message}`, { variant: 'warning' })
-        }
-      )
-
-      setIsTracking(true)
-      setIsInitialized(true)
-      
-      // Si hay un servicio activo, iniciar tracking del servicio
-      if (currentService?.id) {
-        await startServiceTracking(currentService.id, driverData.id, {
-          restaurantId: currentService.restaurantId,
-          restaurantLocation: currentService.restaurantLocation,
-          deliveryLocation: currentService.deliveryLocation
-        })
-        lastServiceId.current = currentService.id
+      const position = await getCurrentPosition()
+      console.log('✅ Ubicación inicial obtenida:', position)
+      if (isMounted.current && position) {
+        setCurrentLocation(position)
+        console.log('✅ Estado currentLocation actualizado')
+        enqueueSnackbar('Ubicación obtenida', { variant: 'success' })
       }
-
-      enqueueSnackbar('Tracking GPS activado', { variant: 'success' })
     } catch (err) {
-      setError(err.message)
-      enqueueSnackbar('Error al iniciar tracking', { variant: 'error' })
+      console.log('⚠️ Primera ubicación no disponible:', err.message)
+      // No es crítico, el watch continuará intentando
     }
+
+    // Iniciar tracking continuo
+    console.log('👁️ Iniciando tracking continuo...')
+    trackingControl.current = startDriverTracking(
+      driverData.id,
+      (location) => {
+        console.log('📍 Ubicación recibida en callback:', location)
+        console.log('📍 isMounted.current:', isMounted.current)
+        if (isMounted.current) {
+          setCurrentLocation(location)
+          setError(null)
+          console.log('✅ currentLocation actualizado en callback')
+        } else {
+          console.log('❌ SKIP actualización - isMounted es false')
+        }
+        
+        if (currentService?.id && currentService.id !== lastServiceId.current) {
+          updateServiceRoute(currentService.id, location)
+        }
+      },
+      (err) => {
+        console.error('❌ Error de tracking:', err.message)
+        if (isMounted.current) {
+          if (err.message.includes('denegado') || err.message.includes('PERMISSION')) {
+            setError(err.message)
+            setIsTracking(false)
+            enqueueSnackbar(err.message, { variant: 'error' })
+          } else if (err.message.includes('tardando') || err.message.includes('TIMEOUT')) {
+            enqueueSnackbar(err.message, { variant: 'warning' })
+          }
+        }
+      }
+    )
+
+    // Tracking de servicio si hay uno activo
+    if (currentService?.id) {
+      startServiceTracking(currentService.id, driverData.id, {
+        restaurantId: currentService.restaurantId,
+        restaurantLocation: currentService.restaurantLocation,
+        deliveryLocation: currentService.deliveryLocation
+      }).catch(() => {})
+      lastServiceId.current = currentService.id
+    }
+
+    enqueueSnackbar('GPS activado', { variant: 'success' })
+    return Promise.resolve()
   }, [driverData, currentService, enqueueSnackbar])
 
-  // Detener tracking
+  // ✅ Detener tracking
   const stopTracking = useCallback(async () => {
+    console.log('🛑 stopTracking llamado')
+    isMounted.current = false
+    setIsTracking(false)
+    setCurrentLocation(null)
+    
+    if (locationRetryRef.current) {
+      clearTimeout(locationRetryRef.current)
+      locationRetryRef.current = null
+    }
+    
     if (trackingControl.current) {
-      await trackingControl.current.stop()
+      try {
+        await trackingControl.current.stop()
+      } catch (e) {}
       trackingControl.current = null
     }
     
     if (driverData?.id) {
-      await stopDriverTracking(driverData.id)
+      try {
+        await stopDriverTracking(driverData.id)
+      } catch (e) {}
     }
     
-    // Finalizar tracking de servicio si hay uno activo
     if (lastServiceId.current) {
-      await endServiceTracking(lastServiceId.current)
+      try {
+        await endServiceTracking(lastServiceId.current)
+      } catch (e) {}
       lastServiceId.current = null
     }
     
-    setIsTracking(false)
-    setCurrentLocation(null)
-    enqueueSnackbar('Tracking GPS desactivado', { variant: 'info' })
+    enqueueSnackbar('GPS desactivado', { variant: 'info' })
   }, [driverData, enqueueSnackbar])
 
-  // Pausar tracking (mantener ubicación pero no actualizar)
+  // ✅ Función para forzar obtención de ubicación
+  const forceGetLocation = useCallback(async () => {
+    console.log('🔄 forceGetLocation llamado')
+    
+    // Asegurar que isMounted está en true
+    isMounted.current = true
+    
+    try {
+      const position = await getCurrentPosition({ timeout: 20000 })
+      console.log('✅ Ubicación forzada obtenida:', position)
+      if (isMounted.current && position) {
+        setCurrentLocation(position)
+        setError(null)
+        enqueueSnackbar('Ubicación actualizada', { variant: 'success' })
+        return position
+      }
+    } catch (err) {
+      console.error('❌ Error en forceGetLocation:', err.message)
+      if (isMounted.current) {
+        if (err.message === 'PERMISSION_DENIED') {
+          setError('Permiso de ubicación denegado. Habilita el GPS en tu navegador.')
+          enqueueSnackbar('Habilita el permiso de ubicación en tu navegador', { variant: 'error' })
+        } else if (err.message === 'TIMEOUT') {
+          enqueueSnackbar('El GPS está tardando. Intenta salir al exterior.', { variant: 'warning' })
+        } else if (err.message === 'POSITION_UNAVAILABLE') {
+          enqueueSnackbar('Ubicación no disponible. Verifica el GPS del dispositivo.', { variant: 'warning' })
+        } else {
+          enqueueSnackbar('No se pudo obtener la ubicación', { variant: 'warning' })
+        }
+      }
+    }
+    return null
+  }, [enqueueSnackbar])
+
+  // Pausar/reanudar
   const pauseTracking = useCallback(async () => {
-    if (trackingControl.current) {
+    if (trackingControl.current?.pause) {
       await trackingControl.current.pause()
       setIsTracking(false)
     }
   }, [])
 
-  // Reanudar tracking
   const resumeTracking = useCallback(() => {
-    if (trackingControl.current) {
+    isMounted.current = true
+    if (trackingControl.current?.resume) {
       trackingControl.current.resume()
       setIsTracking(true)
     } else {
@@ -117,41 +227,40 @@ export const useDriverTracking = (driverData, currentService = null) => {
     }
   }, [startTracking])
 
-  // Calcular ETA a destino
   const getETA = useCallback((destination) => {
     if (!currentLocation || !destination) return null
     return calculateETA(currentLocation, destination)
   }, [currentLocation])
 
-  // Geocodificar dirección
   const geocode = useCallback(async (address) => {
     return await geocodeAddress(address)
   }, [])
 
-  // Cleanup al desmontar
+  // Cleanup
   useEffect(() => {
+    isMounted.current = true
     return () => {
+      isMounted.current = false
       if (trackingControl.current) {
-        trackingControl.current.stop()
+        trackingControl.current.stop().catch(() => {})
+      }
+      if (locationRetryRef.current) {
+        clearTimeout(locationRetryRef.current)
       }
     }
   }, [])
 
-  // Cambio de servicio activo
+  // Cambio de servicio
   useEffect(() => {
     if (isTracking && currentService?.id && currentService.id !== lastServiceId.current) {
-      // Finalizar tracking anterior si existe
       if (lastServiceId.current) {
-        endServiceTracking(lastServiceId.current)
+        endServiceTracking(lastServiceId.current).catch(() => {})
       }
-      
-      // Iniciar nuevo tracking
-      startServiceTracking(currentService.id, driverData.id, {
+      startServiceTracking(currentService.id, driverData?.id, {
         restaurantId: currentService.restaurantId,
         restaurantLocation: currentService.restaurantLocation,
         deliveryLocation: currentService.deliveryLocation
-      })
-      
+      }).catch(() => {})
       lastServiceId.current = currentService.id
     }
   }, [currentService, driverData, isTracking])
@@ -160,71 +269,72 @@ export const useDriverTracking = (driverData, currentService = null) => {
     isTracking,
     currentLocation,
     error,
+    permissionStatus,
     isInitialized,
     startTracking,
     stopTracking,
     pauseTracking,
     resumeTracking,
+    forceGetLocation,
     getETA,
     geocode
   }
 }
 
 /**
- * Hook para monitorear la ubicación de un conductor (para restaurantes/admin)
- * @param {string} driverId - ID del conductor a monitorear
- * @param {string} serviceId - ID del servicio (opcional)
- * @returns {Object} - Estado del tracking
+ * Hook para monitorear ubicación de conductor
  */
 export const useDriverMonitor = (driverId, serviceId = null) => {
   const [driverLocation, setDriverLocation] = useState(null)
   const [serviceTracking, setServiceTracking] = useState(null)
   const [isConnected, setIsConnected] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(null)
+  const isMounted = useRef(true)
+
+  useEffect(() => {
+    isMounted.current = true
+    return () => { isMounted.current = false }
+  }, [])
 
   useEffect(() => {
     if (!driverId) return
 
-    // Importar dinámicamente para evitar errores en SSR
     import('../services/locationService').then(({ 
       subscribeToDriverLocation,
       subscribeToServiceTracking 
     }) => {
-      // Suscribirse a ubicación del conductor
+      if (!isMounted.current) return
+      
       const unsubLocation = subscribeToDriverLocation(driverId, (location) => {
-        setDriverLocation(location)
-        setIsConnected(!!location?.isValid)
-        setLastUpdate(location?.timestamp || null)
+        if (isMounted.current) {
+          setDriverLocation(location)
+          setIsConnected(!!location?.isValid)
+          setLastUpdate(location?.timestamp || null)
+        }
       })
 
-      // Suscribirse a tracking del servicio si hay serviceId
       let unsubService = null
       if (serviceId) {
         unsubService = subscribeToServiceTracking(serviceId, (tracking) => {
-          setServiceTracking(tracking)
+          if (isMounted.current) {
+            setServiceTracking(tracking)
+          }
         })
       }
 
       return () => {
-        unsubLocation()
-        if (unsubService) unsubService()
+        unsubLocation?.()
+        unsubService?.()
       }
     })
   }, [driverId, serviceId])
 
-  // Calcular ETA si hay ubicación y destino
   const getETA = useCallback((destination) => {
     if (!driverLocation || !destination) return null
     return calculateETA(driverLocation, destination)
   }, [driverLocation])
 
-  return {
-    driverLocation,
-    serviceTracking,
-    isConnected,
-    lastUpdate,
-    getETA
-  }
+  return { driverLocation, serviceTracking, isConnected, lastUpdate, getETA }
 }
 
 export default useDriverTracking

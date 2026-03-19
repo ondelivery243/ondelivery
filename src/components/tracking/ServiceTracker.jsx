@@ -12,7 +12,8 @@ import {
   Button,
   useTheme,
   alpha,
-  Skeleton
+  Skeleton,
+  Grid
 } from '@mui/material'
 import {
   Store as StoreIcon,
@@ -372,8 +373,5 @@ const ServiceTracker = ({
     </Card>
   )
 }
-
-// Importar Grid para el componente
-import { Grid } from '@mui/material'
 
 export default ServiceTracker

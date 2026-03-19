@@ -17,7 +17,8 @@ import {
   useTheme,
   useMediaQuery,
   alpha,
-  Button
+  Button,
+  LinearProgress
 } from '@mui/material'
 import {
   AttachMoney as MoneyIcon,
@@ -26,51 +27,100 @@ import {
   AccessTime as ClockIcon,
   Download as DownloadIcon
 } from '@mui/icons-material'
-import { formatCurrency, formatDate } from '../../store/useStore'
-import { subscribeToSettlements, subscribeToRestaurantServices } from '../../services/firestore'
+import { formatCurrency, formatDate, useRestaurantStore, useStore } from '../../store/useStore'
+import { subscribeToSettlements, subscribeToRestaurantServices, getRestaurantByUserId, getRestaurant } from '../../services/firestore'
 
 export default function RestauranteLiquidacion() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const { restaurantData, setRestaurantData } = useRestaurantStore()
+  const { user } = useStore()
   
   const [settlements, setSettlements] = useState([])
   const [services, setServices] = useState([])
   const [pendingAmount, setPendingAmount] = useState(0)
   const [totalPaid, setTotalPaid] = useState(0)
+  const [loading, setLoading] = useState(true)
 
   // Cargar datos
   useEffect(() => {
-    const restaurantId = localStorage.getItem('restaurantId') || 'demo_restaurant'
-    
-    // Cargar liquidaciones
-    const unsubSettlements = subscribeToSettlements((data) => {
-      const restaurantSettlements = data.filter(s => s.restaurantId === restaurantId)
-      setSettlements(restaurantSettlements)
+    const loadData = async () => {
+      setLoading(true)
       
-      // Calcular totales
-      const paid = restaurantSettlements
-        .filter(s => s.status === 'pagado')
-        .reduce((sum, s) => sum + (s.amount || 0), 0)
-      setTotalPaid(paid)
-    })
-    
-    // Cargar servicios para calcular pendiente
-    const unsubServices = subscribeToRestaurantServices(restaurantId, (servicesData) => {
-      const unpaid = servicesData
-        .filter(s => s.status === 'entregado' && !s.settled)
-        .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-      setPendingAmount(unpaid)
-      setServices(servicesData)
-    })
-    
-    return () => {
-      unsubSettlements()
-      unsubServices()
+      let restaurant = restaurantData
+      if (!restaurant && user) {
+        if (user.restaurantId) {
+          restaurant = await getRestaurant(user.restaurantId)
+        } else {
+          restaurant = await getRestaurantByUserId(user.uid)
+        }
+        if (restaurant) {
+          setRestaurantData(restaurant)
+        }
+      }
+      
+      if (restaurant?.id) {
+        // Cargar liquidaciones
+        const unsubSettlements = subscribeToSettlements((data) => {
+          const restaurantSettlements = data.filter(s => s.restaurantId === restaurant.id)
+          setSettlements(restaurantSettlements)
+          
+          // Calcular totales
+          const paid = restaurantSettlements
+            .filter(s => s.status === 'pagado')
+            .reduce((sum, s) => sum + (s.amount || 0), 0)
+          setTotalPaid(paid)
+        })
+        
+        // Cargar servicios para calcular pendiente
+        const unsubServices = subscribeToRestaurantServices(restaurant.id, (servicesData) => {
+          const unpaid = servicesData
+            .filter(s => s.status === 'entregado' && !s.settled)
+            .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+          setPendingAmount(unpaid)
+          setServices(servicesData)
+          setLoading(false)
+        })
+        
+        return () => {
+          unsubSettlements()
+          unsubServices()
+        }
+      } else {
+        setLoading(false)
+      }
     }
-  }, [])
+    
+    loadData()
+  }, [restaurantData, setRestaurantData, user])
 
   // Servicios pendientes de liquidar
   const pendingServices = services.filter(s => s.status === 'entregado' && !s.settled)
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <LinearProgress />
+        <Typography variant="body2" color="text.secondary">Cargando liquidaciones...</Typography>
+      </Box>
+    )
+  }
+
+  if (!restaurantData) {
+    return (
+      <Card sx={{ borderRadius: 2 }}>
+        <CardContent sx={{ p: 4, textAlign: 'center' }}>
+          <MoneyIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            No hay datos del restaurante
+          </Typography>
+          <Typography variant="body2" color="text.disabled">
+            Si acabas de registrarte, espera a que un administrador active tu cuenta.
+          </Typography>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

@@ -95,6 +95,7 @@ export const useStore = create((set, get) => ({
     set({ initialized: true })
     
     const unsubscribe = subscribeToAuthChanges((user) => {
+      console.log('🔐 Auth state changed - user:', user)
       set({ user, loading: false })
     })
     
