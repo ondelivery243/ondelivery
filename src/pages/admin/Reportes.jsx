@@ -10,13 +10,17 @@ import {
   Skeleton,
   Paper,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Chip,
+  alpha
 } from '@mui/material'
 import {
   Inventory as PackageIcon,
   AttachMoney as MoneyIcon,
   Store as StoreIcon,
-  TwoWheeler as BikeIcon
+  TwoWheeler as BikeIcon,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon
 } from '@mui/icons-material'
 import { formatCurrency } from '../../store/useStore'
 import { 
@@ -25,6 +29,7 @@ import {
   getRestaurants,
   getDrivers
 } from '../../services/firestore'
+import { RIDERY_COLORS } from '../../theme/theme'
 
 export default function Reportes() {
   const theme = useTheme()
@@ -35,6 +40,7 @@ export default function Reportes() {
   const [topRestaurants, setTopRestaurants] = useState([])
   const [topDrivers, setTopDrivers] = useState([])
   const [weeklyData, setWeeklyData] = useState([])
+  const currentYear = new Date().getFullYear()
 
   useEffect(() => {
     const loadData = async () => {
@@ -48,7 +54,7 @@ export default function Reportes() {
         // Cargar servicios para análisis
         const services = await getServices()
         
-        // Calcular datos de la semana
+        // Calcular datos de la semana (Lunes a Domingo)
         const weekData = calculateWeeklyData(services)
         setWeeklyData(weekData)
         
@@ -71,15 +77,25 @@ export default function Reportes() {
     loadData()
   }, [])
 
-  // Calcular datos de la última semana
+  // Calcular datos de la última semana (ordenado Lunes a Domingo)
   const calculateWeeklyData = (services) => {
-    const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+    // Días ordenados de Lunes a Domingo
+    const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
     const today = new Date()
+    
+    // Encontrar el lunes de esta semana
+    const currentDay = today.getDay() // 0 = Domingo, 1 = Lunes, etc.
+    const daysToMonday = currentDay === 0 ? -6 : 1 - currentDay
+    const mondayOfWeek = new Date(today)
+    mondayOfWeek.setDate(today.getDate() + daysToMonday)
+    mondayOfWeek.setHours(0, 0, 0, 0)
+    
     const weekData = []
     
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today)
-      date.setDate(date.getDate() - i)
+    // Generar datos de Lunes a Domingo
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(mondayOfWeek)
+      date.setDate(mondayOfWeek.getDate() + i)
       date.setHours(0, 0, 0, 0)
       
       const nextDate = new Date(date)
@@ -91,12 +107,15 @@ export default function Reportes() {
       })
       
       const ingresos = dayServices.reduce((sum, s) => sum + (s.platformFee || 0), 0)
+      const isToday = date.toDateString() === today.toDateString()
       
       weekData.push({
-        day: days[date.getDay()],
+        day: days[i],
         fecha: date.toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }),
         servicios: dayServices.length,
-        ingresos
+        ingresos,
+        isToday,
+        date: date
       })
     }
     
@@ -169,6 +188,12 @@ export default function Reportes() {
       bgColor: '#F59E0B'
     },
   ]
+  
+  // Calcular totales de la semana
+  const weekTotals = weeklyData.reduce((acc, day) => ({
+    services: acc.services + day.servicios,
+    ingresos: acc.ingresos + day.ingresos
+  }), { services: 0, ingresos: 0 })
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -225,12 +250,24 @@ export default function Reportes() {
         ))}
       </Grid>
 
-      {/* Weekly Report */}
+      {/* Weekly Report - Ordenado Lunes a Domingo */}
       <Card>
         <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-          <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>
-            Resumen Semanal
-          </Typography>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+            <Typography variant="subtitle1" fontWeight="bold">
+              Resumen Semanal (Lunes - Domingo)
+            </Typography>
+            {!loading && (
+              <Stack direction="row" spacing={2}>
+                <Typography variant="body2" color="text.secondary">
+                  Total: <strong>{weekTotals.services} servicios</strong>
+                </Typography>
+                <Typography variant="body2" color="success.main" fontWeight="bold">
+                  {formatCurrency(weekTotals.ingresos)}
+                </Typography>
+              </Stack>
+            )}
+          </Stack>
           
           {loading ? (
             <Skeleton variant="rectangular" height={100} />
@@ -243,10 +280,17 @@ export default function Reportes() {
                     sx={{ 
                       textAlign: 'center', 
                       p: 1,
-                      bgcolor: day.servicios > 0 ? 'inherit' : 'grey.50'
+                      bgcolor: day.isToday 
+                        ? alpha(theme.palette.primary.main, 0.1)
+                        : day.servicios > 0 ? 'inherit' : 'grey.50',
+                      border: day.isToday ? 2 : 1,
+                      borderColor: day.isToday ? 'primary.main' : 'divider'
                     }}
                   >
-                    <Typography variant="caption" color="text.secondary">
+                    {day.isToday && (
+                      <Chip label="Hoy" size="small" color="primary" sx={{ mb: 0.5, height: 18, fontSize: '0.65rem' }} />
+                    )}
+                    <Typography variant="caption" color={day.isToday ? 'primary' : 'text.secondary'} fontWeight={day.isToday ? 'bold' : 'normal'}>
                       {day.day}
                     </Typography>
                     <Typography variant="caption" display="block" color="text.disabled">
@@ -438,6 +482,36 @@ export default function Reportes() {
           )}
         </CardContent>
       </Card>
+
+      {/* Footer Info */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
     </Box>
   )
 }

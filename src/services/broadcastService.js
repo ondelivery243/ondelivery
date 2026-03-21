@@ -440,6 +440,85 @@ export const acceptServiceBroadcast = async (serviceId, driverId, driverName) =>
 }
 
 /**
+ * Repartidor rechaza el servicio
+ * Registra el rechazo y verifica si debe hacer retry con otros drivers
+ */
+export const rejectServiceBroadcast = async (serviceId, driverId) => {
+  try {
+    console.log(`❌ Repartidor ${driverId} rechazando servicio ${serviceId}`)
+
+    const broadcastRef = ref(rtdb, `${BROADCAST_PATH}/${serviceId}`)
+    const snapshot = await get(broadcastRef)
+
+    if (!snapshot.exists()) {
+      return { success: false, error: 'Servicio no disponible' }
+    }
+
+    const broadcastData = snapshot.val()
+
+    if (broadcastData.status !== 'broadcasting') {
+      return { success: false, error: 'Servicio ya no disponible' }
+    }
+
+    // Registrar rechazo
+    const rejectedDrivers = broadcastData.rejectedDrivers || {}
+    rejectedDrivers[driverId] = {
+      rejectedAt: Date.now()
+    }
+
+    // Remover de notifiedDrivers
+    const notifiedDrivers = broadcastData.notifiedDrivers || {}
+    delete notifiedDrivers[driverId]
+
+    // Contar cuántos drivers quedan disponibles
+    const remainingDrivers = Object.keys(notifiedDrivers).filter(
+      id => !rejectedDrivers[id]
+    )
+
+    console.log(`📊 Drivers restantes disponibles: ${remainingDrivers.length}`)
+
+    // Actualizar broadcast
+    await update(broadcastRef, {
+      rejectedDrivers,
+      notifiedDrivers,
+      [`rejectedBy.${driverId}`]: Date.now()
+    })
+
+    // Si no quedan drivers disponibles, intentar siguiente ciclo inmediatamente
+    if (remainingDrivers.length === 0) {
+      console.log('⚠️ No quedan drivers disponibles, iniciando siguiente intento...')
+      
+      if (broadcastData.currentAttempt < broadcastData.maxAttempts) {
+        // Esperar un momento y hacer retry
+        setTimeout(async () => {
+          const nextAttempt = broadcastData.currentAttempt + 1
+          console.log(`🔄 Iniciando intento ${nextAttempt} por rechazo masivo`)
+          await runBroadcastCycle(serviceId, nextAttempt)
+        }, 2000)
+      } else {
+        // Se agotaron los intentos
+        await update(broadcastRef, {
+          status: 'no_drivers',
+          expiredAt: Date.now(),
+          expireReason: 'all_drivers_rejected'
+        })
+
+        await updateDoc(doc(db, 'services', serviceId), {
+          broadcastStatus: 'no_drivers',
+          status: 'sin_repartidor',
+          updatedAt: serverTimestamp()
+        })
+      }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error('❌ Error rechazando servicio:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+/**
  * Verifica y maneja expiración del broadcast
  */
 export const checkBroadcastExpiration = async (serviceId) => {
@@ -639,6 +718,7 @@ export default {
   createServiceBroadcast,
   runBroadcastCycle,
   acceptServiceBroadcast,
+  rejectServiceBroadcast,
   checkBroadcastExpiration,
   subscribeToAvailableServices,
   subscribeToBroadcast,

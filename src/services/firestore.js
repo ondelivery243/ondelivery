@@ -491,8 +491,10 @@ export const createService = async (serviceData) => {
     const serviceId = `${day}${month}${year}${hours}${minutes}${initials}`
     console.log('📋 Service ID generado:', serviceId)
 
-    // Obtener ubicación del restaurante
+    // Obtener ubicación y teléfono del restaurante
     let restaurantLocation = null
+    let restaurantPhone = serviceData.restaurantPhone || null
+    
     if (serviceData.restaurantId) {
       try {
         const restaurantDoc = await getDoc(doc(db, 'restaurants', serviceData.restaurantId))
@@ -504,6 +506,11 @@ export const createService = async (serviceData) => {
               longitude: rData.longitude
             }
             console.log('📍 Ubicación del restaurante:', restaurantLocation)
+          }
+          // Obtener teléfono del restaurante si no se proporcionó
+          if (!restaurantPhone && rData.phone) {
+            restaurantPhone = rData.phone
+            console.log('📞 Teléfono del restaurante:', restaurantPhone)
           }
         }
       } catch (e) {
@@ -524,6 +531,7 @@ export const createService = async (serviceData) => {
     const docRef = await addDoc(collection(db, SERVICES_COLLECTION), {
       ...serviceData,
       serviceId,
+      restaurantPhone,
       status: 'pendiente',
       broadcastStatus: 'pending',
       broadcastAttempts: 0,
@@ -543,6 +551,7 @@ export const createService = async (serviceData) => {
       const broadcastResult = await createServiceBroadcast(docRef.id, {
         ...serviceData,
         serviceId,
+        restaurantPhone,
         restaurantLocation
       })
       
@@ -679,6 +688,70 @@ export const cancelService = async (serviceId, reason = '', cancelledBy = 'syste
     
     return { success: true }
   } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+// ============================================
+// REINTENTAR SERVICIO (cuando no hay repartidor)
+// ============================================
+export const retryService = async (serviceId) => {
+  try {
+    console.log('🔄 Reintentando servicio:', serviceId)
+    
+    const serviceRef = doc(db, SERVICES_COLLECTION, serviceId)
+    const serviceDoc = await getDoc(serviceRef)
+    
+    if (!serviceDoc.exists()) {
+      return { success: false, error: 'Servicio no encontrado' }
+    }
+    
+    const serviceData = serviceDoc.data()
+    
+    // Solo se puede reintentar si está sin repartidor o cancelado por falta de conductores
+    if (!['sin_repartidor', 'pendiente'].includes(serviceData.status)) {
+      return { success: false, error: 'El servicio no puede ser reintentado en su estado actual' }
+    }
+    
+    // Resetear el estado del servicio
+    await updateDoc(serviceRef, {
+      status: 'pendiente',
+      broadcastStatus: 'pending',
+      broadcastAttempts: 0,
+      broadcastRadius: 0,
+      driverId: null,
+      driverName: null,
+      retryCount: (serviceData.retryCount || 0) + 1,
+      retriedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    })
+    
+    console.log('✅ Servicio reseteado, iniciando nuevo broadcast...')
+    
+    // Iniciar nuevo broadcast
+    try {
+      const { createServiceBroadcast } = await import('./broadcastService.js')
+      const broadcastResult = await createServiceBroadcast(serviceId, {
+        ...serviceData,
+        restaurantLocation: serviceData.restaurantLocation || {
+          latitude: 10.2647,
+          longitude: -67.6084
+        }
+      })
+      
+      if (broadcastResult.success) {
+        console.log('✅ Nuevo broadcast iniciado correctamente')
+        return { success: true, message: 'Servicio republicado. Buscando repartidores...' }
+      } else {
+        console.error('❌ Error en nuevo broadcast:', broadcastResult.error)
+        return { success: false, error: broadcastResult.error }
+      }
+    } catch (broadcastError) {
+      console.error('❌ Error iniciando broadcast:', broadcastError)
+      return { success: false, error: broadcastError.message }
+    }
+  } catch (error) {
+    console.error('❌ Error reintentando servicio:', error)
     return { success: false, error: error.message }
   }
 }

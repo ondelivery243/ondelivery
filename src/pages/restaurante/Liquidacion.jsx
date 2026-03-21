@@ -1,3 +1,4 @@
+// src/pages/restaurante/Liquidacion.jsx
 import { useState, useEffect } from 'react'
 import {
   Box,
@@ -24,11 +25,11 @@ import {
   AttachMoney as MoneyIcon,
   Receipt as ReceiptIcon,
   CheckCircle as CheckIcon,
-  AccessTime as ClockIcon,
-  Download as DownloadIcon
+  AccessTime as ClockIcon
 } from '@mui/icons-material'
 import { formatCurrency, formatDate, useRestaurantStore, useStore } from '../../store/useStore'
 import { subscribeToSettlements, subscribeToRestaurantServices, getRestaurantByUserId, getRestaurant } from '../../services/firestore'
+import { RIDERY_COLORS } from '../../theme/theme'
 
 export default function RestauranteLiquidacion() {
   const theme = useTheme()
@@ -41,8 +42,9 @@ export default function RestauranteLiquidacion() {
   const [pendingAmount, setPendingAmount] = useState(0)
   const [totalPaid, setTotalPaid] = useState(0)
   const [loading, setLoading] = useState(true)
+  const currentYear = new Date().getFullYear()
 
-  // Cargar datos
+  // Cargar datos en tiempo real
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
@@ -60,22 +62,27 @@ export default function RestauranteLiquidacion() {
       }
       
       if (restaurant?.id) {
-        // Cargar liquidaciones
+        // Cargar liquidaciones en tiempo real
         const unsubSettlements = subscribeToSettlements((data) => {
           const restaurantSettlements = data.filter(s => s.restaurantId === restaurant.id)
           setSettlements(restaurantSettlements)
           
-          // Calcular totales
+          // Calcular total pagado
           const paid = restaurantSettlements
             .filter(s => s.status === 'pagado')
             .reduce((sum, s) => sum + (s.amount || 0), 0)
           setTotalPaid(paid)
         })
         
-        // Cargar servicios para calcular pendiente
+        // Cargar servicios en tiempo real para calcular pendiente
         const unsubServices = subscribeToRestaurantServices(restaurant.id, (servicesData) => {
+          // Usar settledRestaurant si existe, si no usar settled (compatibilidad)
           const unpaid = servicesData
-            .filter(s => s.status === 'entregado' && !s.settled)
+            .filter(s => {
+              const isDelivered = s.status === 'entregado'
+              const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
+              return isDelivered && !settledField
+            })
             .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
           setPendingAmount(unpaid)
           setServices(servicesData)
@@ -95,7 +102,11 @@ export default function RestauranteLiquidacion() {
   }, [restaurantData, setRestaurantData, user])
 
   // Servicios pendientes de liquidar
-  const pendingServices = services.filter(s => s.status === 'entregado' && !s.settled)
+  const pendingServices = services.filter(s => {
+    const isDelivered = s.status === 'entregado'
+    const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
+    return isDelivered && !settledField
+  })
 
   if (loading) {
     return (
@@ -144,7 +155,7 @@ export default function RestauranteLiquidacion() {
                 {formatCurrency(pendingAmount)}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Por Liquidar
+                Por Pagar
               </Typography>
               <Typography variant="caption" color="text.disabled">
                 {pendingServices.length} servicios pendientes
@@ -188,7 +199,7 @@ export default function RestauranteLiquidacion() {
               <Stack direction="row" spacing={1} alignItems="center">
                 <ClockIcon color="warning" />
                 <Typography variant="subtitle1" fontWeight="bold">
-                  Servicios Pendientes de Liquidar
+                  Servicios Pendientes de Pagar
                 </Typography>
               </Stack>
               <Chip label={`${pendingServices.length} servicios`} color="warning" size="small" />
@@ -330,6 +341,36 @@ export default function RestauranteLiquidacion() {
           Para consultas sobre pagos, contacta a administración.
         </Typography>
       </Paper>
+
+      {/* Footer */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
     </Box>
   )
 }

@@ -1,3 +1,4 @@
+// netlify/functions/uploadImage.js
 // Netlify Function: Upload Image to ImgBB
 // Sube imágenes a ImgBB (alternativa gratuita a Firebase Storage)
 

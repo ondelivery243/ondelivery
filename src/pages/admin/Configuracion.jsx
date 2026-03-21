@@ -23,10 +23,12 @@ import {
 import { useSnackbar } from 'notistack'
 import { useStore } from '../../store/useStore'
 import { getSettings, updateSettings } from '../../services/firestore'
+import { RIDERY_COLORS } from '../../theme/theme'
 
 export default function Configuracion() {
   const { enqueueSnackbar } = useSnackbar()
   const { user } = useStore()
+  const currentYear = new Date().getFullYear()
   
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -302,6 +304,36 @@ export default function Configuracion() {
           </Grid>
         </Grid>
       )}
+
+      {/* Footer Info */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
     </Box>
   )
 }

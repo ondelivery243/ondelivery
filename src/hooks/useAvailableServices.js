@@ -2,8 +2,9 @@
 // Hook para suscribirse a servicios disponibles para repartidores
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { 
-  subscribeToAvailableServices, 
+  subscribeToAvailableServices as subscribeToServices,
   acceptServiceBroadcast,
+  rejectServiceBroadcast,
   BROADCAST_CONFIG 
 } from '../services/broadcastService'
 
@@ -21,6 +22,7 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
   
   const unsubscribeRef = useRef(null)
   const expirationCheckRef = useRef(null)
+  const initialLoadDoneRef = useRef(false)
 
   // Suscribirse a servicios cuando el driver está online y tiene ubicación
   useEffect(() => {
@@ -33,13 +35,17 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
     // Solo suscribir si está online y tiene ubicación válida
     if (!isOnline || !driverId || !driverLocation?.latitude || !driverLocation?.longitude) {
       setAvailableServices([])
+      setLoading(false)
       return
     }
 
-    setLoading(true)
+    // Solo mostrar loading en la primera carga, no en cada actualización
+    if (!initialLoadDoneRef.current) {
+      setLoading(true)
+    }
 
     // Suscribirse a servicios disponibles
-    unsubscribeRef.current = subscribeToAvailableServices(
+    unsubscribeRef.current = subscribeToServices(
       driverId,
       driverLocation,
       (services) => {
@@ -53,6 +59,7 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
         setAvailableServices(activeServices)
         setLoading(false)
         setError(null)
+        initialLoadDoneRef.current = true
       }
     )
 
@@ -117,7 +124,28 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
     }
   }, [driverId])
 
-  // Función para ignorar un servicio (removerlo localmente)
+  // Función para rechazar un servicio (notificar al sistema)
+  const rejectService = useCallback(async (serviceId) => {
+    if (!serviceId || !driverId) {
+      return { success: false, error: 'Datos incompletos' }
+    }
+
+    try {
+      const result = await rejectServiceBroadcast(serviceId, driverId)
+
+      if (result.success) {
+        // Remover el servicio de la lista local
+        setAvailableServices(prev => prev.filter(s => s.serviceId !== serviceId && s.id !== serviceId))
+      }
+
+      return result
+    } catch (err) {
+      console.error('Error rechazando servicio:', err)
+      return { success: false, error: err.message }
+    }
+  }, [driverId])
+
+  // Función para ignorar un servicio (solo removerlo localmente, sin notificar)
   const ignoreService = useCallback((serviceId) => {
     setAvailableServices(prev => prev.filter(s => s.serviceId !== serviceId && s.id !== serviceId))
   }, [])
@@ -134,6 +162,7 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
     error,
     acceptingServiceId,
     acceptService,
+    rejectService,
     ignoreService,
     getClosestService,
     hasAvailableServices: availableServices.length > 0

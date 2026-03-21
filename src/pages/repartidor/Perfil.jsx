@@ -1,5 +1,5 @@
 // src/pages/repartidor/Perfil.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Box,
   Card,
@@ -22,7 +22,11 @@ import {
   useMediaQuery,
   alpha,
   IconButton,
-  CircularProgress
+  CircularProgress,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material'
 import {
   Person as PersonIcon,
@@ -36,7 +40,10 @@ import {
   Warning as WarningIcon,
   Lock as LockIcon,
   DirectionsBike as BicycleIcon,
-  Moped as MopedIcon
+  Moped as MopedIcon,
+  PhotoCamera as PhotoCameraIcon,
+  Computer as ComputerIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { useStore, formatCurrency } from '../../store/useStore'
@@ -49,6 +56,53 @@ import { auth } from '../../config/firebase'
 import { RatingWidget } from '../../components/rating'
 import { RIDERY_COLORS } from '../../theme/theme'
 
+// Función para subir imagen a ImgBB vía Netlify Function
+const uploadImageToImgBB = async (file, name) => {
+  try {
+    // Convertir archivo a base64
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(file)
+      reader.onload = () => {
+        // Remover el prefijo data:image/...;base64,
+        const base64String = reader.result.split(',')[1]
+        resolve(base64String)
+      }
+      reader.onerror = (error) => reject(error)
+    })
+
+    // Llamar a la Netlify Function
+    const response = await fetch('/.netlify/functions/uploadImage', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        image: base64,
+        name: name || 'foto-repartidor'
+      })
+    })
+
+    const result = await response.json()
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Error subiendo imagen')
+    }
+
+    return {
+      success: true,
+      url: result.url,
+      thumbnail: result.thumbnail
+    }
+  } catch (error) {
+    console.error('Error subiendo imagen:', error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+}
+
 export default function RepartidorPerfil() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
@@ -58,8 +112,13 @@ export default function RepartidorPerfil() {
   const [driverData, setDriverData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [editDialog, setEditDialog] = useState({ open: false, field: '', value: '' })
   const [passwordDialog, setPasswordDialog] = useState({ open: false, currentPassword: '', newPassword: '', confirmPassword: '' })
+  const [photoMenuAnchor, setPhotoMenuAnchor] = useState(null)
+  
+  const fileInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
 
   // Cargar datos reales
   useEffect(() => {
@@ -79,6 +138,103 @@ export default function RepartidorPerfil() {
     
     loadData()
   }, [user])
+
+  // Manejar selección de imagen desde archivo
+  const handleFileSelect = (event) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      handleImageUpload(file)
+    }
+    // Resetear el input
+    event.target.value = ''
+    setPhotoMenuAnchor(null)
+  }
+
+  // Subir imagen a ImgBB y guardar URL
+  const handleImageUpload = async (file) => {
+    if (!driverData?.id) {
+      enqueueSnackbar('No se pueden guardar los cambios', { variant: 'error' })
+      return
+    }
+
+    // Validar tipo de archivo
+    if (!file.type.startsWith('image/')) {
+      enqueueSnackbar('Por favor selecciona una imagen válida', { variant: 'error' })
+      return
+    }
+
+    // Validar tamaño (máximo 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      enqueueSnackbar('La imagen no puede superar los 5MB', { variant: 'error' })
+      return
+    }
+
+    setUploadingPhoto(true)
+
+    try {
+      // Subir a ImgBB
+      const uploadResult = await uploadImageToImgBB(
+        file,
+        `foto-${driverData.name?.toLowerCase().replace(/\s+/g, '-') || 'repartidor'}`
+      )
+
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error || 'Error subiendo imagen')
+      }
+
+      // Guardar URL en Firestore
+      const updateResult = await updateDriver(driverData.id, {
+        photoUrl: uploadResult.url,
+        photoThumbnail: uploadResult.thumbnail
+      })
+
+      if (updateResult.success) {
+        setDriverData(prev => ({
+          ...prev,
+          photoUrl: uploadResult.url,
+          photoThumbnail: uploadResult.thumbnail
+        }))
+        enqueueSnackbar('Foto actualizada correctamente', { variant: 'success' })
+      } else {
+        throw new Error(updateResult.error || 'Error guardando en la base de datos')
+      }
+    } catch (error) {
+      console.error('Error subiendo foto:', error)
+      enqueueSnackbar(error.message || 'Error al subir la foto', { variant: 'error' })
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
+
+  // Eliminar foto
+  const handleDeletePhoto = async () => {
+    if (!driverData?.id) return
+
+    setUploadingPhoto(true)
+
+    try {
+      const result = await updateDriver(driverData.id, {
+        photoUrl: null,
+        photoThumbnail: null
+      })
+
+      if (result.success) {
+        setDriverData(prev => ({
+          ...prev,
+          photoUrl: null,
+          photoThumbnail: null
+        }))
+        enqueueSnackbar('Foto eliminada correctamente', { variant: 'success' })
+      } else {
+        throw new Error(result.error || 'Error eliminando foto')
+      }
+    } catch (error) {
+      enqueueSnackbar('Error al eliminar la foto', { variant: 'error' })
+    } finally {
+      setUploadingPhoto(false)
+      setPhotoMenuAnchor(null)
+    }
+  }
 
   // Guardar cambios
   const handleSaveField = async () => {
@@ -171,28 +327,100 @@ export default function RepartidorPerfil() {
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
             <Box sx={{ position: 'relative' }}>
               <Avatar
+                src={driverData?.photoUrl || undefined}
                 sx={{
                   width: { xs: 80, sm: 100 },
                   height: { xs: 80, sm: 100 },
-                  bgcolor: 'success.main',
+                  bgcolor: driverData?.photoUrl ? 'transparent' : 'success.main',
                   fontSize: { xs: '2rem', sm: '2.5rem' },
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
+                  border: driverData?.photoUrl ? '3px solid' : 'none',
+                  borderColor: 'success.main'
                 }}
               >
-                {driverData?.name?.charAt(0)?.toUpperCase() || user?.name?.charAt(0)?.toUpperCase() || 'R'}
+                {!driverData?.photoUrl && (
+                  driverData?.name?.charAt(0)?.toUpperCase() || user?.name?.charAt(0)?.toUpperCase() || 'R'
+                )}
               </Avatar>
+              
+              {/* Botón de cámara */}
               <IconButton
                 size="small"
                 sx={{
                   position: 'absolute',
                   bottom: 0,
                   right: 0,
-                  bgcolor: 'background.paper',
-                  boxShadow: 1
+                  bgcolor: 'success.main',
+                  color: 'white',
+                  boxShadow: 2,
+                  '&:hover': {
+                    bgcolor: 'success.dark'
+                  }
+                }}
+                onClick={(e) => setPhotoMenuAnchor(e.currentTarget)}
+                disabled={uploadingPhoto}
+              >
+                {uploadingPhoto ? (
+                  <CircularProgress size={16} color="inherit" />
+                ) : (
+                  <CameraIcon fontSize="small" />
+                )}
+              </IconButton>
+
+              {/* Menu de opciones para foto */}
+              <Menu
+                anchorEl={photoMenuAnchor}
+                open={Boolean(photoMenuAnchor)}
+                onClose={() => setPhotoMenuAnchor(null)}
+                anchorOrigin={{
+                  vertical: 'bottom',
+                  horizontal: 'right',
+                }}
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
                 }}
               >
-                <CameraIcon fontSize="small" />
-              </IconButton>
+                <MenuItem onClick={() => cameraInputRef.current?.click()}>
+                  <ListItemIcon>
+                    <PhotoCameraIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Tomar foto</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => fileInputRef.current?.click()}>
+                  <ListItemIcon>
+                    <ComputerIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Subir desde galería</ListItemText>
+                </MenuItem>
+                {driverData?.photoUrl && (
+                  <MenuItem onClick={handleDeletePhoto} sx={{ color: 'error.main' }}>
+                    <ListItemIcon>
+                      <DeleteIcon fontSize="small" color="error" />
+                    </ListItemIcon>
+                    <ListItemText>Eliminar foto</ListItemText>
+                  </MenuItem>
+                )}
+              </Menu>
+
+              {/* Input oculto para cámara */}
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+              />
+
+              {/* Input oculto para archivo */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+              />
             </Box>
             
             <Box sx={{ textAlign: 'center' }}>
@@ -202,6 +430,11 @@ export default function RepartidorPerfil() {
               <Typography variant="body2" color="text.secondary">
                 {driverData?.email || user?.email}
               </Typography>
+              {driverData?.photoUrl && (
+                <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>
+                  Toca el ícono de cámara para cambiar la foto
+                </Typography>
+              )}
             </Box>
 
             {/* Rating y stats */}
@@ -434,7 +667,7 @@ export default function RepartidorPerfil() {
         </CardContent>
       </Card>
 
-      {/* Footer Info */}
+      {/* Footer */}
       <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
           <Box

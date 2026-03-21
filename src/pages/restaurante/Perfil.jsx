@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+// src/pages/restaurante/Perfil.jsx
+import { useState, useEffect, useRef } from 'react'
 import {
   Box,
   Card,
@@ -19,7 +20,11 @@ import {
   useMediaQuery,
   alpha,
   IconButton,
-  CircularProgress
+  CircularProgress,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material'
 import {
   Person as PersonIcon,
@@ -30,17 +35,67 @@ import {
   Camera as CameraIcon,
   CheckCircle as CheckIcon,
   Lock as LockIcon,
-  LocationOn as LocationIcon
+  LocationOn as LocationIcon,
+  PhotoCamera as PhotoCameraIcon,
+  Computer as ComputerIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { useStore } from '../../store/useStore'
 import { 
   getRestaurantByUserId, 
-  updateRestaurant, 
-  getUser
+  updateRestaurant
 } from '../../services/firestore'
 import { updatePassword } from 'firebase/auth'
 import { auth } from '../../config/firebase'
+import { RIDERY_COLORS } from '../../theme/theme'
+
+// Función para subir imagen a ImgBB vía Netlify Function
+const uploadImageToImgBB = async (file, name) => {
+  try {
+    // Convertir archivo a base64
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(file)
+      reader.onload = () => {
+        // Remover el prefijo data:image/...;base64,
+        const base64String = reader.result.split(',')[1]
+        resolve(base64String)
+      }
+      reader.onerror = (error) => reject(error)
+    })
+
+    // Llamar a la Netlify Function
+    const response = await fetch('/.netlify/functions/uploadImage', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        image: base64,
+        name: name || 'logo-restaurante'
+      })
+    })
+
+    const result = await response.json()
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Error subiendo imagen')
+    }
+
+    return {
+      success: true,
+      url: result.url,
+      thumbnail: result.thumbnail
+    }
+  } catch (error) {
+    console.error('Error subiendo imagen:', error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+}
 
 export default function RestaurantePerfil() {
   const theme = useTheme()
@@ -51,8 +106,14 @@ export default function RestaurantePerfil() {
   const [restaurantData, setRestaurantData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
   const [editDialog, setEditDialog] = useState({ open: false, field: '', value: '' })
   const [passwordDialog, setPasswordDialog] = useState({ open: false, newPassword: '', confirmPassword: '' })
+  const [logoMenuAnchor, setLogoMenuAnchor] = useState(null)
+  
+  const fileInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
+  const currentYear = new Date().getFullYear()
 
   // Cargar datos reales
   useEffect(() => {
@@ -61,12 +122,10 @@ export default function RestaurantePerfil() {
       
       setLoading(true)
       try {
-        // Obtener datos del restaurante usando el userId
         const restaurant = await getRestaurantByUserId(user.uid)
         if (restaurant) {
           setRestaurantData(restaurant)
         } else {
-          // Si no hay restaurante, usar datos del usuario
           setRestaurantData({
             name: user.name || 'Mi Restaurante',
             email: user.email,
@@ -85,6 +144,103 @@ export default function RestaurantePerfil() {
     
     loadData()
   }, [user])
+
+  // Manejar selección de imagen desde archivo
+  const handleFileSelect = (event) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      handleImageUpload(file)
+    }
+    // Resetear el input
+    event.target.value = ''
+    setLogoMenuAnchor(null)
+  }
+
+  // Subir imagen a ImgBB y guardar URL
+  const handleImageUpload = async (file) => {
+    if (!restaurantData?.id) {
+      enqueueSnackbar('No se pueden guardar los cambios', { variant: 'error' })
+      return
+    }
+
+    // Validar tipo de archivo
+    if (!file.type.startsWith('image/')) {
+      enqueueSnackbar('Por favor selecciona una imagen válida', { variant: 'error' })
+      return
+    }
+
+    // Validar tamaño (máximo 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      enqueueSnackbar('La imagen no puede superar los 5MB', { variant: 'error' })
+      return
+    }
+
+    setUploadingLogo(true)
+
+    try {
+      // Subir a ImgBB
+      const uploadResult = await uploadImageToImgBB(
+        file,
+        `logo-${restaurantData.name?.toLowerCase().replace(/\s+/g, '-') || 'restaurante'}`
+      )
+
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error || 'Error subiendo imagen')
+      }
+
+      // Guardar URL en Firestore
+      const updateResult = await updateRestaurant(restaurantData.id, {
+        logoUrl: uploadResult.url,
+        logoThumbnail: uploadResult.thumbnail
+      })
+
+      if (updateResult.success) {
+        setRestaurantData(prev => ({
+          ...prev,
+          logoUrl: uploadResult.url,
+          logoThumbnail: uploadResult.thumbnail
+        }))
+        enqueueSnackbar('Logo actualizado correctamente', { variant: 'success' })
+      } else {
+        throw new Error(updateResult.error || 'Error guardando en la base de datos')
+      }
+    } catch (error) {
+      console.error('Error subiendo logo:', error)
+      enqueueSnackbar(error.message || 'Error al subir el logo', { variant: 'error' })
+    } finally {
+      setUploadingLogo(false)
+    }
+  }
+
+  // Eliminar logo
+  const handleDeleteLogo = async () => {
+    if (!restaurantData?.id) return
+
+    setUploadingLogo(true)
+
+    try {
+      const result = await updateRestaurant(restaurantData.id, {
+        logoUrl: null,
+        logoThumbnail: null
+      })
+
+      if (result.success) {
+        setRestaurantData(prev => ({
+          ...prev,
+          logoUrl: null,
+          logoThumbnail: null
+        }))
+        enqueueSnackbar('Logo eliminado correctamente', { variant: 'success' })
+      } else {
+        throw new Error(result.error || 'Error eliminando logo')
+      }
+    } catch (error) {
+      enqueueSnackbar('Error al eliminar el logo', { variant: 'error' })
+    } finally {
+      setUploadingLogo(false)
+      setLogoMenuAnchor(null)
+    }
+  }
 
   // Guardar cambios
   const handleSaveField = async () => {
@@ -165,28 +321,100 @@ export default function RestaurantePerfil() {
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
             <Box sx={{ position: 'relative' }}>
               <Avatar
+                src={restaurantData?.logoUrl || undefined}
                 sx={{
                   width: { xs: 80, sm: 100 },
                   height: { xs: 80, sm: 100 },
-                  bgcolor: 'primary.main',
+                  bgcolor: restaurantData?.logoUrl ? 'transparent' : 'primary.main',
                   fontSize: { xs: '2rem', sm: '2.5rem' },
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
+                  border: restaurantData?.logoUrl ? '3px solid' : 'none',
+                  borderColor: 'primary.main'
                 }}
               >
-                {restaurantData?.name?.charAt(0)?.toUpperCase() || <StoreIcon sx={{ fontSize: 48 }} />}
+                {!restaurantData?.logoUrl && (
+                  restaurantData?.name?.charAt(0)?.toUpperCase() || <StoreIcon sx={{ fontSize: 48 }} />
+                )}
               </Avatar>
+              
+              {/* Botón de cámara */}
               <IconButton
                 size="small"
                 sx={{
                   position: 'absolute',
                   bottom: 0,
                   right: 0,
-                  bgcolor: 'background.paper',
-                  boxShadow: 1
+                  bgcolor: 'primary.main',
+                  color: 'white',
+                  boxShadow: 2,
+                  '&:hover': {
+                    bgcolor: 'primary.dark'
+                  }
+                }}
+                onClick={(e) => setLogoMenuAnchor(e.currentTarget)}
+                disabled={uploadingLogo}
+              >
+                {uploadingLogo ? (
+                  <CircularProgress size={16} color="inherit" />
+                ) : (
+                  <CameraIcon fontSize="small" />
+                )}
+              </IconButton>
+
+              {/* Menu de opciones para logo */}
+              <Menu
+                anchorEl={logoMenuAnchor}
+                open={Boolean(logoMenuAnchor)}
+                onClose={() => setLogoMenuAnchor(null)}
+                anchorOrigin={{
+                  vertical: 'bottom',
+                  horizontal: 'right',
+                }}
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
                 }}
               >
-                <CameraIcon fontSize="small" />
-              </IconButton>
+                <MenuItem onClick={() => cameraInputRef.current?.click()}>
+                  <ListItemIcon>
+                    <PhotoCameraIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Tomar foto</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => fileInputRef.current?.click()}>
+                  <ListItemIcon>
+                    <ComputerIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Subir desde galería</ListItemText>
+                </MenuItem>
+                {restaurantData?.logoUrl && (
+                  <MenuItem onClick={handleDeleteLogo} sx={{ color: 'error.main' }}>
+                    <ListItemIcon>
+                      <DeleteIcon fontSize="small" color="error" />
+                    </ListItemIcon>
+                    <ListItemText>Eliminar logo</ListItemText>
+                  </MenuItem>
+                )}
+              </Menu>
+
+              {/* Input oculto para cámara */}
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+              />
+
+              {/* Input oculto para archivo */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+              />
             </Box>
             
             <Box sx={{ textAlign: 'center' }}>
@@ -196,6 +424,11 @@ export default function RestaurantePerfil() {
               <Typography variant="body2" color="text.secondary">
                 {restaurantData?.email || user?.email}
               </Typography>
+              {restaurantData?.logoUrl && (
+                <Typography variant="caption" color="primary" sx={{ display: 'block', mt: 0.5 }}>
+                  Toca el ícono de cámara para cambiar el logo
+                </Typography>
+              )}
             </Box>
 
             {/* Status */}
@@ -399,15 +632,35 @@ export default function RestaurantePerfil() {
         </CardContent>
       </Card>
 
-      {/* App Info */}
-      <Paper sx={{ p: 2, borderRadius: 2, bgcolor: alpha(theme.palette.primary.main, 0.05) }}>
-        <Typography variant="caption" color="text.secondary" align="center" display="block">
-          ON Delivery v1.0.0
+      {/* Footer */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
         </Typography>
-        <Typography variant="caption" color="text.disabled" align="center" display="block">
-          © 2024 ON Delivery - Maracay, Venezuela
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
         </Typography>
-      </Paper>
+      </Box>
 
       {/* Edit Field Dialog */}
       <Dialog

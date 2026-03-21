@@ -1,5 +1,5 @@
 // src/pages/admin/Dashboard.jsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { alpha } from '@mui/material/styles'
 import {
@@ -50,6 +50,7 @@ import {
   getDashboardStats,
   formatVes
 } from '../../services/firestore'
+import { RIDERY_COLORS } from '../../theme/theme'
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
@@ -70,6 +71,11 @@ export default function AdminDashboard() {
   const [exchangeRate, setExchangeRate] = useState({ rate: 0, lastUpdate: null })
   const [loading, setLoading] = useState(true)
   const [refreshingRate, setRefreshingRate] = useState(false)
+  
+  // Estado para rastrear cuando REALMENTE cambió la tasa
+  const [rateUpdateDisplay, setRateUpdateDisplay] = useState({ date: null, rate: null })
+  const prevRateRef = useRef(0)
+  const currentYear = new Date().getFullYear()
 
   // Cargar datos
   useEffect(() => {
@@ -78,7 +84,15 @@ export default function AdminDashboard() {
     const unsubServices = subscribeToServices((data) => setServices(data))
     const unsubRestaurants = subscribeToRestaurants((data) => setRestaurants(data))
     const unsubDrivers = subscribeToDrivers((data) => setDrivers(data))
-    const unsubExchangeRate = subscribeToExchangeRate((data) => setExchangeRate(data))
+    const unsubExchangeRate = subscribeToExchangeRate((data) => {
+      setExchangeRate(data)
+      
+      // Solo actualizar la fecha mostrada si el VALOR de la tasa cambió
+      if (data.rate && data.rate !== prevRateRef.current) {
+        prevRateRef.current = data.rate
+        setRateUpdateDisplay({ date: data.lastUpdate, rate: data.rate })
+      }
+    })
     
     loadStats()
     setLoading(false)
@@ -172,13 +186,13 @@ export default function AdminDashboard() {
                 </Typography>
                 <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
                   {formatExchangeRate(exchangeRate.rate)} Bs/$                 </Typography>
-                
-                {/* Fecha movida AQUÍ, debajo de la tasa */}
-                {exchangeRate.lastUpdate && (
+              
+                {/* Fecha - Solo se actualiza cuando el VALOR cambia */}
+                {rateUpdateDisplay.date && (
                   <Stack direction="row" spacing={0.5} alignItems="center" sx={{ opacity: 0.9, mt: 0.5 }}>
                     <UpdateIcon sx={{ fontSize: 14 }} />
                     <Typography variant="body2" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
-                      Actualizado: {formatUpdateDate(exchangeRate.lastUpdate)}
+                      Actualizado: {formatUpdateDate(rateUpdateDisplay.date)}
                     </Typography>
                   </Stack>
                 )}
@@ -356,6 +370,36 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* Footer Info */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
     </Box>
   )
 }

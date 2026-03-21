@@ -1,3 +1,4 @@
+// src/pages/restaurante/RestauranteLayout.jsx
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation, Outlet } from 'react-router-dom'
 import {
@@ -27,7 +28,7 @@ import {
   Person as PersonIcon,
   Settings as SettingsIcon,
   Logout as LogoutIcon,
-  Notifications as NotificationsIcon,
+  Share as ShareIcon,
   Menu as MenuIcon,
   Store as StoreIcon,
   LightMode as LightModeIcon,
@@ -85,6 +86,20 @@ export default function RestauranteLayout() {
   const handleNavigation = (path) => {
     navigate(path)
     if (isMobile) setDrawerOpen(false)
+  }
+
+  // Función para compartir por WhatsApp
+  const handleShare = () => {
+    const message = `🛵 ON Delivery - Transforma la gestión de tus deliveries
+
+Control. Historial. Liquidaciones. Todo en un solo lugar.
+
+Únete a la nueva era del delivery.
+
+👉 https://on-delivery.netlify.app/`
+    
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`
+    window.open(whatsappUrl, '_blank')
   }
 
   const drawerContent = (
@@ -221,8 +236,8 @@ export default function RestauranteLayout() {
             <IconButton onClick={toggleTheme} sx={{ color: 'text.primary' }}>
               {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
             </IconButton>
-            <IconButton sx={{ color: 'text.primary' }}>
-              <NotificationsIcon />
+            <IconButton onClick={handleShare} sx={{ color: 'text.primary' }}>
+              <ShareIcon />
             </IconButton>
           </Toolbar>
         </AppBar>

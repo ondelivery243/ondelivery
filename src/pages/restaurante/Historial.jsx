@@ -1,3 +1,4 @@
+// src/pages/restaurante/Historial.jsx
 import { useState, useEffect } from 'react'
 import {
   Box,
@@ -29,11 +30,11 @@ import {
   ExpandMore as ExpandIcon,
   ExpandLess as CollapseIcon,
   LocationOn as LocationIcon,
-  Store as StoreIcon,
   AttachMoney as MoneyIcon
 } from '@mui/icons-material'
 import { formatCurrency, formatDate, formatTime, useRestaurantStore, useStore } from '../../store/useStore'
 import { subscribeToRestaurantServices, getRestaurantByUserId, getRestaurant } from '../../services/firestore'
+import { RIDERY_COLORS } from '../../theme/theme'
 
 export default function RestauranteHistorial() {
   const theme = useTheme()
@@ -47,6 +48,7 @@ export default function RestauranteHistorial() {
   const [statusFilter, setStatusFilter] = useState('todos')
   const [expandedId, setExpandedId] = useState(null)
   const [loading, setLoading] = useState(true)
+  const currentYear = new Date().getFullYear()
 
   // Cargar datos del restaurante
   useEffect(() => {
@@ -112,12 +114,12 @@ export default function RestauranteHistorial() {
     return configs[status] || configs.pendiente
   }
 
-  // Calcular totales
-  const totalGastado = filteredServices
+  // Calcular totales en tiempo real
+  const totalPagado = services
     .filter(s => s.status === 'entregado')
     .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
 
-  const totalServicios = filteredServices.filter(s => s.status === 'entregado').length
+  const totalServicios = services.filter(s => s.status === 'entregado').length
 
   // Tabs
   const tabs = [
@@ -167,14 +169,14 @@ export default function RestauranteHistorial() {
       {/* Stats Cards */}
       <Grid container spacing={2}>
         <Grid item xs={6}>
-          <Card sx={{ borderRadius: 2, bgcolor: 'primary.light' }}>
+          <Card sx={{ borderRadius: 2, bgcolor: 'warning.light' }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
-              <MoneyIcon sx={{ color: 'primary.main', mb: 0.5 }} />
-              <Typography variant="h5" fontWeight="bold" color="primary.dark">
-                {formatCurrency(totalGastado)}
+              <MoneyIcon sx={{ color: 'warning.dark', mb: 0.5 }} />
+              <Typography variant="h5" fontWeight="bold" color="warning.dark">
+                {formatCurrency(totalPagado)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Total Gastado
+                Total Pagado
               </Typography>
             </CardContent>
           </Card>
@@ -278,7 +280,7 @@ export default function RestauranteHistorial() {
                       />
                     </Box>
                     <Stack direction="row" spacing={1} alignItems="center">
-                      <Typography variant="body2" fontWeight="bold" color="primary">
+                      <Typography variant="body2" fontWeight="bold" color="warning.main">
                         {formatCurrency(service.deliveryFee)}
                       </Typography>
                       {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
@@ -349,6 +351,36 @@ export default function RestauranteHistorial() {
           })
         )}
       </Stack>
+
+      {/* Footer */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
     </Box>
   )
 }

@@ -206,13 +206,32 @@ const calculateDriverEarnings = (service, commissionRate = 20) => {
   return deliveryFee * (1 - rate / 100)
 }
 
+// Función helper para formatear fechas
+const formatDate = (timestamp) => {
+  if (!timestamp) return '--'
+  
+  const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp)
+  const now = new Date()
+  const diffMs = now - date
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+  
+  if (diffMins < 1) return 'Ahora'
+  if (diffMins < 60) return `Hace ${diffMins}m`
+  if (diffHours < 24) return `Hace ${diffHours}h`
+  if (diffDays < 7) return `Hace ${diffDays}d`
+  
+  return date.toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })
+}
+
 // ============================================
 // COMPONENTE: TARJETA DE SERVICIO BROADCAST
 // ============================================
 const BroadcastNotificationCard = ({ 
   service, 
   onAccept, 
-  onIgnore, 
+  onReject, 
   isAccepting = false,
   commissionRate = 20 
 }) => {
@@ -265,14 +284,14 @@ const BroadcastNotificationCard = ({
     setTimeout(() => onAccept?.(service.serviceId || service.id), 200)
   }
 
-  const handleIgnore = () => {
+  const handleReject = () => {
     setIsExiting(true)
-    stopServiceAlert() // Detener sonido al ignorar
-    setTimeout(() => onIgnore?.(service.serviceId || service.id), 200)
+    stopServiceAlert() // Detener sonido al rechazar
+    setTimeout(() => onReject?.(service.serviceId || service.id), 200)
   }
 
   useEffect(() => {
-    if (timeRemaining === 0 && !isExiting) handleIgnore()
+    if (timeRemaining === 0 && !isExiting) handleReject()
   }, [timeRemaining])
 
   return (
@@ -298,15 +317,6 @@ const BroadcastNotificationCard = ({
               }}>
                 {formatTime(timeRemaining)}
               </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Chip label={`Intento ${service.currentAttempt || 1}`} size="small" sx={{
-                backgroundColor: alpha(theme.palette.warning.main, 0.2),
-                color: theme.palette.warning.main
-              }} />
-              <IconButton size="small" onClick={handleIgnore} sx={{ color: 'rgba(255,255,255,0.5)' }}>
-                <CloseIcon fontSize="small" />
-              </IconButton>
             </Box>
           </Box>
 
@@ -338,18 +348,41 @@ const BroadcastNotificationCard = ({
             </Typography>
           </Box>
 
-          <Button variant="contained" fullWidth onClick={handleAccept} disabled={isAccepting || timeRemaining === 0}
-            sx={{ py: 1.5, backgroundColor: theme.palette.success.main, color: '#000', fontWeight: 'bold', fontSize: '1rem' }}>
-            {isAccepting ? (
+          <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+            <Button 
+              variant="outlined" 
+              fullWidth 
+              onClick={handleReject} 
+              disabled={isAccepting || timeRemaining === 0}
+              sx={{ 
+                py: 1.5, 
+                borderColor: theme.palette.error.main, 
+                color: theme.palette.error.main,
+                '&:hover': { borderColor: theme.palette.error.dark, backgroundColor: alpha(theme.palette.error.main, 0.1) }
+              }}
+            >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CircularProgress size={16} color="inherit" /> Aceptando...
+                <CancelIcon fontSize="small" /> Rechazar
               </Box>
-            ) : (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CheckIcon fontSize="small" /> Aceptar Servicio
-              </Box>
-            )}
-          </Button>
+            </Button>
+            <Button 
+              variant="contained" 
+              fullWidth 
+              onClick={handleAccept} 
+              disabled={isAccepting || timeRemaining === 0}
+              sx={{ py: 1.5, backgroundColor: theme.palette.success.main, color: '#000', fontWeight: 'bold', fontSize: '1rem' }}
+            >
+              {isAccepting ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CircularProgress size={16} color="inherit" /> Aceptando...
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CheckIcon fontSize="small" /> Aceptar
+                </Box>
+              )}
+            </Button>
+          </Stack>
 
           <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: 'rgba(255,255,255,0.5)', textAlign: 'center', fontStyle: 'italic' }}>
             La dirección exacta se mostrará al aceptar
@@ -400,7 +433,7 @@ export default function RepartidorDashboard() {
     loading: broadcastLoading,
     acceptingServiceId,
     acceptService: acceptBroadcastService,
-    ignoreService: ignoreBroadcastService,
+    rejectService: rejectBroadcastService,
     hasAvailableServices: hasBroadcastServices
   } = useAvailableServices(driverData?.id, currentLocation, isOnline && useBroadcast)
 
@@ -606,6 +639,18 @@ export default function RepartidorDashboard() {
       enqueueSnackbar('¡Servicio aceptado! Dirígete al restaurante', { variant: 'success' })
     } else {
       enqueueSnackbar(result.error || 'No se pudo aceptar el servicio', { variant: 'error' })
+    }
+  }
+
+  const handleRejectBroadcastService = async (serviceId) => {
+    if (!driverData?.id) return
+    
+    const result = await rejectBroadcastService(serviceId)
+    
+    if (result.success) {
+      enqueueSnackbar('Servicio rechazado', { variant: 'info' })
+    } else {
+      enqueueSnackbar(result.error || 'No se pudo rechazar el servicio', { variant: 'error' })
     }
   }
 
@@ -825,6 +870,18 @@ export default function RepartidorDashboard() {
                   <Typography variant="caption" color="text.secondary"><StoreIcon sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />Recoger en:</Typography>
                   <Typography variant="subtitle2" fontWeight="bold">{currentService.restaurantName}</Typography>
                   <Typography variant="body2" color="text.secondary">{currentService.restaurantAddress}</Typography>
+                  {currentService.restaurantPhone && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        <PhoneIcon sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
+                        {currentService.restaurantPhone}
+                      </Typography>
+                      <IconButton size="small" color="success" onClick={() => window.open(`tel:${currentService.restaurantPhone}`, '_self')}
+                        sx={{ bgcolor: 'success.main', color: 'white', '&:hover': { bgcolor: 'success.dark' } }}>
+                        <PhoneIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  )}
                 </Paper>
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -901,7 +958,7 @@ export default function RepartidorDashboard() {
             )}
           </Box>
 
-          {useBroadcast && broadcastLoading ? (
+          {useBroadcast && broadcastLoading && !hasBroadcastServices ? (
             <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 2 }} />
           ) : useBroadcast && hasBroadcastServices ? (
             <Box>
@@ -910,13 +967,13 @@ export default function RepartidorDashboard() {
                   key={service.serviceId || service.id}
                   service={service}
                   onAccept={handleAcceptBroadcastService}
-                  onIgnore={ignoreBroadcastService}
+                  onReject={handleRejectBroadcastService}
                   isAccepting={acceptingServiceId === service.serviceId}
                   commissionRate={appSettings.commissionRate}
                 />
               ))}
             </Box>
-          ) : useBroadcast ? (
+          ) : useBroadcast && isOnline && !currentService ? (
             <Card sx={{ p: 4, textAlign: 'center', bgcolor: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 2 }}>
               <BikeIcon sx={{ fontSize: 60, color: 'rgba(255,255,255,0.2)', mb: 2 }} />
               <Typography variant="h6" color="text.secondary" gutterBottom>Sin servicios cercanos</Typography>
@@ -938,42 +995,107 @@ export default function RepartidorDashboard() {
         </CardContent>
       </Card>
 
-      {/* Confirmation Dialog */}
-      <Dialog open={confirmDialog.open} onClose={() => setConfirmDialog({ open: false, type: '', service: null })} maxWidth="sm" fullWidth>
-        <DialogTitle>¿Completar entrega?</DialogTitle>
+      {/* Historial de servicios */}
+      <Card sx={{ borderRadius: 2 }}>
+        <CardHeader avatar={<BikeIcon color="primary" />} title={<Typography variant="subtitle1" fontWeight="bold">Historial Reciente</Typography>} action={<IconButton onClick={loadStats} size="small"><RefreshIcon /></IconButton>} />
+        <CardContent sx={{ pt: 0 }}>
+          {myServices.length === 0 ? (
+            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
+              <BikeIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">No hay servicios en tu historial</Typography>
+            </Paper>
+          ) : (
+            <Stack spacing={1}>
+              {myServices.slice(0, 10).map((service) => {
+                const status = getStatusConfig(service.status)
+                return (
+                  <Paper key={service.id} variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                    <Grid container spacing={1} alignItems="center">
+                      <Grid item xs={4}>
+                        <Typography variant="subtitle2" fontWeight="bold">ID: {service.serviceId}</Typography>
+                        <Typography variant="caption" color="text.secondary">{formatDate(service.createdAt)}</Typography>
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="body2" noWrap>{service.zoneName}</Typography>
+                      </Grid>
+                      <Grid item xs={2}>
+                        <Typography variant="body2" fontWeight="bold" color="success.main">{formatCurrency(calculateDriverEarnings(service, appSettings.commissionRate))}</Typography>
+                      </Grid>
+                      <Grid item xs={2}>
+                        <Chip icon={status.icon} label={status.label} size="small" color={status.color} />
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                )
+              })}
+            </Stack>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Footer */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
+
+      {/* Confirm Dialog */}
+      <Dialog open={confirmDialog.open} onClose={() => setConfirmDialog({ open: false, type: '', service: null })}>
+        <DialogTitle>Confirmar acción</DialogTitle>
         <DialogContent>
-          {confirmDialog.service && (
-            <Card sx={{ p: 2, mt: 2, bgcolor: 'success.light' }}>
-              <Typography variant="body2">Ganancia: <strong>{formatCurrency(calculateDriverEarnings(confirmDialog.service, appSettings.commissionRate))}</strong></Typography>
-            </Card>
+          {confirmDialog.type === 'complete' && (
+            <Typography>¿Confirmas que has entregado el pedido? Ganarás {formatCurrency(calculateDriverEarnings(confirmDialog.service, appSettings.commissionRate))}</Typography>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setConfirmDialog({ open: false, type: '', service: null })} fullWidth>Cancelar</Button>
-          <Button variant="contained" color="success" onClick={() => handleCompleteService(confirmDialog.service)} disabled={loading} fullWidth>Confirmar</Button>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialog({ open: false, type: '', service: null })}>Cancelar</Button>
+          <Button variant="contained" color="success" onClick={() => handleCompleteService(confirmDialog.service)} disabled={loading}>
+            {loading ? <CircularProgress size={20} /> : 'Confirmar'}
+          </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Chat FAB */}
+      {/* Chat Modal */}
       {currentService && (
-        <ChatButton
-          service={currentService}
-          currentUser={{ id: driverData?.id, name: driverData?.name || user?.name, role: 'driver' }}
-          otherParty={{ name: currentService.restaurantName, role: 'restaurant' }}
-          variant="fab"
-          onChatOpenChange={(isOpen) => { chatOpenRef.current = isOpen }}
-        />
+        <Dialog open={!!currentService && !confirmDialog.open} onClose={() => {}} maxWidth="sm" fullWidth fullScreen={isMobile}>
+          <DialogTitle>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Box>
+                <Typography variant="subtitle1" fontWeight="bold">Chat del Servicio</Typography>
+                <Typography variant="caption" color="text.secondary">{currentService.restaurantName || 'Restaurante'}</Typography>
+              </Box>
+              <IconButton onClick={() => setCurrentService(null)}><CloseIcon /></IconButton>
+            </Stack>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
+            <ChatButton serviceId={currentService.id} driverId={driverData?.id} restaurantId={currentService.restaurantId} />
+          </DialogContent>
+        </Dialog>
       )}
-
-      {/* Footer */}
-      <Box sx={{ mt: 3, py: 3, textAlign: 'center' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-          <Box component="img" src="/logo-192.png" alt="ON Delivery" sx={{ width: 28, height: 28, borderRadius: 1 }} />
-          <Typography variant="subtitle2" fontWeight="bold" sx={{ background: RIDERY_COLORS.gradientPrimary, backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent' }}>ON Delivery</Typography>
-        </Box>
-        <Typography variant="caption" color="text.secondary" display="block">© {currentYear} Copyright. Desarrollado por Erick Simosa</Typography>
-        <Typography variant="caption" color="text.secondary">ericksimosa@gmail.com - 0424 3036024</Typography>
-      </Box>
     </Box>
   )
 }

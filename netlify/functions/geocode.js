@@ -1,3 +1,4 @@
+// netlify/functions/geocode.js
 // Netlify Function: Geocoding
 // Convierte direcciones a coordenadas usando OpenStreetMap Nominatim
 

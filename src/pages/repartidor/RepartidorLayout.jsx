@@ -27,7 +27,7 @@ import {
   History as HistoryIcon,
   Person as PersonIcon,
   Logout as LogoutIcon,
-  Notifications as NotificationsIcon,
+  Share as ShareIcon,
   PowerSettingsNew as PowerIcon,
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon
@@ -91,6 +91,20 @@ export default function RepartidorLayout() {
     } else {
       enqueueSnackbar('Error al cambiar estado', { variant: 'error' })
     }
+  }
+
+  // Función para compartir por WhatsApp
+  const handleShare = () => {
+    const message = `🛵 ON Delivery - Transforma la gestión de tus deliveries
+
+Control. Historial. Liquidaciones. Todo en un solo lugar.
+
+Únete a la nueva era del delivery.
+
+👉 https://on-delivery.netlify.app/`
+    
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`
+    window.open(whatsappUrl, '_blank')
   }
 
   const handleLogout = () => {
@@ -166,8 +180,8 @@ export default function RepartidorLayout() {
           <IconButton onClick={toggleTheme} sx={{ color: 'text.primary' }} size="small">
             {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
           </IconButton>
-          <IconButton sx={{ color: 'text.primary' }} size="small">
-            <NotificationsIcon fontSize="small" />
+          <IconButton onClick={handleShare} sx={{ color: 'text.primary' }} size="small">
+            <ShareIcon fontSize="small" />
           </IconButton>
           <IconButton sx={{ color: 'text.primary' }} onClick={handleLogout} size="small">
             <LogoutIcon fontSize="small" />

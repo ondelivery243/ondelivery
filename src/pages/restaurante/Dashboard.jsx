@@ -19,22 +19,19 @@ import { useSnackbar } from 'notistack'
 import { formatCurrency, formatTime, formatDate, useRestaurantStore, useStore } from '../../store/useStore'
 import { 
   subscribeToRestaurantServices, subscribeToZones, getRestaurantByUserId,
-  getRestaurant, getRestaurantStats, createService, getSettings
+  getRestaurant, createService, getSettings
 } from '../../services/firestore'
 import { canRateService } from '../../services/ratingService'
 import { ChatButton } from '../../components/chat'
 import { RatingModal } from '../../components/rating'
 import { ServiceTracker } from '../../components/tracking'
 import { subscribeToChatRoom } from '../../services/chatService'
+import { RIDERY_COLORS } from '../../theme/theme'
 
-// Componente para tabs
 function TabPanel({ value, index, children }) {
   return value === index ? <Box sx={{ pt: 2 }}>{children}</Box> : null
 }
 
-// ============================================
-// 🔊 SONIDO DE NOTIFICACIÓN DE CHAT
-// ============================================
 let audioContextInstance = null
 
 const initAudioContext = () => {
@@ -47,35 +44,28 @@ const initAudioContext = () => {
   return audioContextInstance
 }
 
-// 💬 SONIDO: NUEVO MENSAJE DE CHAT - "Ding" distintivo
 const playChatMessageSound = () => {
   try {
     const ctx = initAudioContext()
     const now = ctx.currentTime
-
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     
     osc.type = 'sine'
     osc.frequency.setValueAtTime(1200, now)
     osc.frequency.exponentialRampToValueAtTime(800, now + 0.15)
-    
     gain.gain.setValueAtTime(0.3, now)
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2)
     
     osc.connect(gain)
     gain.connect(ctx.destination)
-    
     osc.start(now)
     osc.stop(now + 0.25)
-
-    console.log('💬 Sonido de MENSAJE DE CHAT reproducido (Restaurante)')
   } catch (e) {
     console.log('❌ Error sonido chat:', e.message)
   }
 }
 
-// Inicializar audio en la primera interacción
 const initAudioOnFirstInteraction = () => {
   initAudioContext()
   document.removeEventListener('click', initAudioOnFirstInteraction)
@@ -98,7 +88,6 @@ export default function RestauranteDashboard() {
   
   const [services, setServices] = useState([])
   const [zones, setZones] = useState([])
-  const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState(null)
   const [chatService, setChatService] = useState(null)
@@ -113,8 +102,9 @@ export default function RestauranteDashboard() {
   
   const chatUnsubscribers = useRef([])
   const chatOpenRef = useRef(false)
-  const prevUnreadRef = useRef({}) // Objeto para rastrear conteos previos por servicio
-  const servicesTrackedRef = useRef(new Set()) // Servicios que ya estamos trackeando
+  const prevUnreadRef = useRef({})
+  const servicesTrackedRef = useRef(new Set())
+  const currentYear = new Date().getFullYear()
   
   const [openDialog, setOpenDialog] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -163,9 +153,6 @@ export default function RestauranteDashboard() {
           setLoading(false)
         })
         
-        const statsData = await getRestaurantStats(restaurant.id)
-        setStats(statsData)
-        
         return () => { unsubZones(); unsubServices() }
       } else {
         setLoading(false)
@@ -177,7 +164,7 @@ export default function RestauranteDashboard() {
     loadData()
   }, [restaurantData, setRestaurantData, user])
 
-  // 💬 SUSCRIPCIÓN A CHAT - Sonido cuando llega mensaje del repartidor
+  // Suscripción a chat
   useEffect(() => {
     chatUnsubscribers.current.forEach(unsub => unsub())
     chatUnsubscribers.current = []
@@ -188,31 +175,18 @@ export default function RestauranteDashboard() {
     
     activeServices.forEach(service => {
       const serviceId = service.id
-      // Marcar que estamos empezando a trackear este servicio
       const wasAlreadyTracked = servicesTrackedRef.current.has(serviceId)
       
       const unsubscribe = subscribeToChatRoom(serviceId, (room) => {
         if (room) {
           const unreadCount = room.unreadByRestaurant || 0
-          
-          // Obtener conteo previo
           const prevCount = prevUnreadRef.current[serviceId] ?? 0
-          
-          // ✅ CORREGIDO: Detectar nuevo mensaje
-          // - Ya estábamos trackeando este servicio (wasAlreadyTracked o ya tiene valor en prevUnreadRef)
-          // - El contador aumentó
-          // - El chat no está abierto
           const isAlreadyInitialized = wasAlreadyTracked || serviceId in prevUnreadRef.current
           const isNewMessage = isAlreadyInitialized && unreadCount > prevCount && !chatOpenRef.current
           
           if (isNewMessage) {
-            console.log('💬 Nuevo mensaje detectado en servicio:', serviceId, 'prevCount:', prevCount, 'unreadCount:', unreadCount)
-            
             playChatMessageSound()
-            
-            if (navigator.vibrate) {
-              navigator.vibrate([200, 100, 200])
-            }
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200])
             
             setLastChatMessage({
               serviceName: service.driverName || service.zoneName,
@@ -231,15 +205,9 @@ export default function RestauranteDashboard() {
             }
           }
           
-          // Actualizar referencia previa y marcar como trackeado
           prevUnreadRef.current[serviceId] = unreadCount
           servicesTrackedRef.current.add(serviceId)
-          
-          // Actualizar estado de conteos
-          setChatUnreadCounts(prev => ({
-            ...prev,
-            [serviceId]: unreadCount
-          }))
+          setChatUnreadCounts(prev => ({ ...prev, [serviceId]: unreadCount }))
         }
       })
       
@@ -254,16 +222,41 @@ export default function RestauranteDashboard() {
 
   const totalUnread = Object.values(chatUnreadCounts).reduce((sum, count) => sum + count, 0)
 
-  // Recargar estadísticas
-  useEffect(() => {
-    const loadStats = async () => {
-      if (restaurantData?.id) {
-        const statsData = await getRestaurantStats(restaurantData.id)
-        setStats(statsData)
-      }
-    }
-    if (services.length > 0) loadStats()
-  }, [services, restaurantData])
+  // ✅ CALCULAR ESTADÍSTICAS EN TIEM REAL (igual que Liquidaciones)
+  const getTodayServices = () => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return services.filter(s => {
+      const createdAt = s.createdAt?.toDate?.()
+      return createdAt && createdAt >= today
+    }).length
+  }
+
+  // ✅ Servicios entregados del mes actual
+  const getMonthlyTotal = () => {
+    const now = new Date()
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    firstDayOfMonth.setHours(0, 0, 0, 0)
+    
+    return services
+      .filter(s => {
+        const createdAt = s.createdAt?.toDate?.()
+        return s.status === 'entregado' && createdAt && createdAt >= firstDayOfMonth
+      })
+      .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+  }
+
+  // ✅ Por pagar: servicios entregados NO liquidados (usa settledRestaurant)
+  const getPendingPayment = () => {
+    return services
+      .filter(s => {
+        if (s.status !== 'entregado') return false
+        // Usar settledRestaurant si existe, si no usar settled (compatibilidad)
+        const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
+        return !settledField
+      })
+      .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+  }
 
   // Detectar servicios para calificar
   useEffect(() => {
@@ -385,13 +378,15 @@ export default function RestauranteDashboard() {
       paymentMethod: nuevoServicio.metodoPago,
       amountToCollect: parseFloat(nuevoServicio.montoCobrar) || 0,
       notes: nuevoServicio.notas,
-      deliveryFee, commissionRate, platformFee, driverEarnings, settled: false
+      deliveryFee, commissionRate, platformFee, driverEarnings,
+      settledRestaurant: false,
+      settledDriver: false
     })
     
     setSaving(false)
     
     if (result.success) {
-      enqueueSnackbar(`Servicio ${result.serviceId} creado. Tarifa: ${formatCurrency(deliveryFee)}`, { variant: 'success' })
+      enqueueSnackbar(`Servicio ${result.serviceId} creado. Costo: ${formatCurrency(deliveryFee)}`, { variant: 'success' })
       setOpenDialog(false)
       setNuevoServicio({ zona: '', direccion: '', cliente: '', telefono: '', metodoPago: 'efectivo', montoCobrar: '', notas: '' })
     } else {
@@ -405,16 +400,32 @@ export default function RestauranteDashboard() {
       asignado: { color: 'info', label: 'Asignado', icon: <DeliveryIcon /> },
       en_camino: { color: 'primary', label: 'En Camino', icon: <DeliveryIcon /> },
       entregado: { color: 'success', label: 'Entregado', icon: <CheckIcon /> },
-      cancelado: { color: 'error', label: 'Cancelado', icon: <CancelIcon /> }
+      cancelado: { color: 'error', label: 'Cancelado', icon: <CancelIcon /> },
+      sin_repartidor: { color: 'error', label: 'Sin Repartidor', icon: <CancelIcon /> }
     }
     return configs[status] || configs.pendiente
   }
 
   const serviciosRecientes = services.slice(0, 5)
-  const serviciosActivos = services.filter(s => s.status === 'pendiente' || s.status === 'asignado' || s.status === 'en_camino')
+  const serviciosActivos = services.filter(s => s.status === 'pendiente' || s.status === 'asignado' || s.status === 'en_camino' || s.status === 'sin_repartidor')
 
   const handleContactDriver = (phone) => {
     if (phone) window.open(`tel:${phone}`, '_self')
+  }
+
+  const handleRetryService = async (serviceId) => {
+    try {
+      const { retryService } = await import('../../services/firestore')
+      const result = await retryService(serviceId)
+      
+      if (result.success) {
+        enqueueSnackbar('Servicio republicado. Buscando repartidores...', { variant: 'success' })
+      } else {
+        enqueueSnackbar(result.error || 'Error al reintentar', { variant: 'error' })
+      }
+    } catch (error) {
+      enqueueSnackbar('Error al reintentar servicio', { variant: 'error' })
+    }
   }
 
   const handleOpenChatFromAlert = (serviceId) => {
@@ -424,6 +435,11 @@ export default function RestauranteDashboard() {
       setShowChatAlert(false)
     }
   }
+
+  // ✅ Valores calculados en tiempo real
+  const servicesToday = getTodayServices()
+  const monthlyTotal = getMonthlyTotal()
+  const pendingPayment = getPendingPayment()
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -435,7 +451,7 @@ export default function RestauranteDashboard() {
           action={
             <Stack direction="row" spacing={1}>
               <Button size="small" variant="outlined" onClick={() => handleOpenChatFromAlert(lastChatMessage.serviceId)}>Ver</Button>
-              <IconButton size="small" onClick={() => setShowChatAlert(false)}><CollapseIcon /></IconButton>
+              <IconButton size="small" onClick={() => setShowChatAlert(false)}><ExpandIcon /></IconButton>
             </Stack>
           }>
           <Typography variant="subtitle2" fontWeight="bold">💬 Nuevo mensaje de {lastChatMessage.serviceName}</Typography>
@@ -472,21 +488,21 @@ export default function RestauranteDashboard() {
             </Button>
           </Stack>
 
-          {/* Stats Cards */}
+          {/* Stats Cards - ✅ Valores calculados en tiempo real */}
           <Grid container spacing={{ xs: 1.5, sm: 3 }}>
             <Grid item xs={4}>
               <Card sx={{ bgcolor: 'primary.main', color: 'white', height: '100%' }}>
                 <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
                   <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Servicios Hoy</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{stats?.servicesToday || 0}</Typography>
+                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{servicesToday}</Typography>
                 </CardContent>
               </Card>
             </Grid>
             <Grid item xs={4}>
               <Card sx={{ bgcolor: 'success.main', color: 'white', height: '100%' }}>
                 <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
-                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Total del Mes</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(stats?.monthlyTotal || 0)}</Typography>
+                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Total Pagado (Mes)</Typography>
+                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(monthlyTotal)}</Typography>
                 </CardContent>
               </Card>
             </Grid>
@@ -494,7 +510,7 @@ export default function RestauranteDashboard() {
               <Card sx={{ bgcolor: 'warning.main', color: 'white', height: '100%' }}>
                 <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
                   <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Por Pagar</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(stats?.pendingPayment || 0)}</Typography>
+                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(pendingPayment)}</Typography>
                 </CardContent>
               </Card>
             </Grid>
@@ -551,7 +567,15 @@ export default function RestauranteDashboard() {
                               <Chip icon={status.icon} label={status.label} size="small" color={status.color} />
                             </Grid>
                             <Grid item xs={12} sm={1.5} sx={{ textAlign: 'right' }}>
-                              {hasDriver && servicio.status !== 'entregado' && (
+                              {servicio.status === 'sin_repartidor' ? (
+                                <Tooltip title="Buscar repartidor nuevamente">
+                                  <IconButton size="small" color="warning"
+                                    onClick={(e) => { e.stopPropagation(); handleRetryService(servicio.id) }}
+                                    sx={{ bgcolor: 'warning.main', color: 'white' }}>
+                                    <RefreshIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              ) : hasDriver && servicio.status !== 'entregado' ? (
                                 <Tooltip title={unreadCount > 0 ? `${unreadCount} mensajes nuevos` : 'Chat'}>
                                   <IconButton size="small" color={unreadCount > 0 ? 'error' : 'primary'}
                                     onClick={(e) => { e.stopPropagation(); setChatService(servicio) }}
@@ -559,9 +583,22 @@ export default function RestauranteDashboard() {
                                     <ChatIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                              )}
+                              ) : null}
                             </Grid>
                           </Grid>
+                          {servicio.status === 'sin_repartidor' && (
+                            <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
+                              <Alert severity="warning" sx={{ py: 0.5, borderRadius: 1 }}
+                                action={
+                                  <Button size="small" variant="outlined" color="warning" 
+                                    onClick={(e) => { e.stopPropagation(); handleRetryService(servicio.id) }}>
+                                    Reintentar
+                                  </Button>
+                                }>
+                                <Typography variant="caption">No se encontró repartidor disponible</Typography>
+                              </Alert>
+                            </Box>
+                          )}
                           {hasDriver && servicio.driverName && (
                             <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
                               <Stack direction="row" spacing={1} alignItems="center">
@@ -774,13 +811,13 @@ export default function RestauranteDashboard() {
               </Grid>
 
               {nuevoServicio.zona && (
-                <Box sx={{ mt: 2, p: 2, bgcolor: 'primary.light', borderRadius: 2, textAlign: 'center' }}>
-                  <Typography variant="body2" color="primary.dark">Tarifa del servicio:</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold" color="primary">
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 2, textAlign: 'center' }}>
+                  <Typography variant="body2" color="warning.dark">Costo del servicio:</Typography>
+                  <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold" color="warning.dark">
                     {formatCurrency(zones.find(z => z.id === nuevoServicio.zona)?.price || 0)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Repartidor recibe: {formatCurrency((zones.find(z => z.id === nuevoServicio.zona)?.price || 0) * (1 - appSettings.commissionRate / 100))} ({100 - appSettings.commissionRate}%)
+                    Este monto será agregado a tu próxima liquidación
                   </Typography>
                 </Box>
               )}
@@ -810,6 +847,36 @@ export default function RestauranteDashboard() {
             driver={ratingModal.driver} restaurantId={restaurantData?.id} onRated={handleRatingComplete} />
         </>
       )}
+
+      {/* Footer */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
     </Box>
   )
 }

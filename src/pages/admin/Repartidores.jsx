@@ -56,11 +56,13 @@ import {
   deleteDriver,
   setDriverOnline
 } from '../../services/firestore'
+import { RIDERY_COLORS } from '../../theme/theme'
 
 export default function AdminRepartidores() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const { enqueueSnackbar } = useSnackbar()
+  const currentYear = new Date().getFullYear()
   
   const [drivers, setDrivers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -638,6 +640,36 @@ export default function AdminRepartidores() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Footer Info */}
+      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+          <Box
+            component="img"
+            src="/logo-192.png"
+            alt="ON Delivery"
+            sx={{ width: 28, height: 28, borderRadius: 1 }}
+          />
+          <Typography
+            variant="subtitle2"
+            fontWeight="bold"
+            sx={{
+              background: RIDERY_COLORS.gradientPrimary,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent'
+            }}
+          >
+            ON Delivery
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ericksimosa@gmail.com - 0424 3036024
+        </Typography>
+      </Box>
     </Box>
   )
 }

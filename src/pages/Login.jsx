@@ -15,6 +15,10 @@ import {
   AppBar,
   Toolbar,
   Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   useTheme,
   useMediaQuery,
   alpha
@@ -28,11 +32,14 @@ import {
   TwoWheeler as BikeIcon,
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon,
-  Home as HomeIcon
+  Home as HomeIcon,
+  Key as KeyIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { useStore, useThemeStore } from '../store/useStore'
 import { loginUser } from '../services/auth'
+import { sendPasswordResetEmail } from 'firebase/auth'
+import { auth } from '../config/firebase'
 import { RIDERY_COLORS } from '../theme/theme'
 
 export default function Login() {
@@ -47,6 +54,11 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  
+  // Estado para recuperación de contraseña
+  const [resetDialogOpen, setResetDialogOpen] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetLoading, setResetLoading] = useState(false)
 
   const handleEmailLogin = async (e) => {
     e.preventDefault()
@@ -74,6 +86,33 @@ export default function Login() {
       enqueueSnackbar('Error al iniciar sesión', { variant: 'error' })
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Función para enviar email de recuperación
+  const handlePasswordReset = async () => {
+    if (!resetEmail) {
+      enqueueSnackbar('Por favor ingresa tu correo electrónico', { variant: 'warning' })
+      return
+    }
+
+    setResetLoading(true)
+    try {
+      await sendPasswordResetEmail(auth, resetEmail)
+      enqueueSnackbar('Se ha enviado un correo para restablecer tu contraseña', { variant: 'success' })
+      setResetDialogOpen(false)
+      setResetEmail('')
+    } catch (error) {
+      console.error('Error sending password reset:', error)
+      if (error.code === 'auth/user-not-found') {
+        enqueueSnackbar('No existe una cuenta con este correo', { variant: 'error' })
+      } else if (error.code === 'auth/invalid-email') {
+        enqueueSnackbar('Correo electrónico inválido', { variant: 'error' })
+      } else {
+        enqueueSnackbar('Error al enviar el correo. Intenta de nuevo.', { variant: 'error' })
+      }
+    } finally {
+      setResetLoading(false)
     }
   }
 
@@ -222,6 +261,32 @@ export default function Login() {
                   )
                 }}
               />
+              
+              {/* Link de recuperar contraseña */}
+              <Box sx={{ textAlign: 'right', mt: 1 }}>
+                <Button
+                  type="button"
+                  size="small"
+                  onClick={() => {
+                    setResetEmail(email)
+                    setResetDialogOpen(true)
+                  }}
+                  sx={{ 
+                    textTransform: 'none',
+                    color: 'primary.main',
+                    fontWeight: 'medium',
+                    p: 0,
+                    minWidth: 'auto',
+                    '&:hover': {
+                      background: 'transparent',
+                      textDecoration: 'underline'
+                    }
+                  }}
+                >
+                  ¿Olvidaste tu contraseña?
+                </Button>
+              </Box>
+
               <Button
                 type="submit"
                 fullWidth
@@ -229,7 +294,7 @@ export default function Login() {
                 size={isMobile ? 'medium' : 'large'}
                 disabled={loading}
                 sx={{ 
-                  mt: 3, 
+                  mt: 2, 
                   py: 1.5,
                   background: RIDERY_COLORS.gradientPrimary,
                   boxShadow: RIDERY_COLORS.shadowGreen,
@@ -288,6 +353,57 @@ export default function Login() {
           </CardContent>
         </Card>
       </Box>
+
+      {/* Dialog para recuperar contraseña */}
+      <Dialog
+        open={resetDialogOpen}
+        onClose={() => setResetDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <KeyIcon color="primary" />
+          Recuperar Contraseña
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Ingresa tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Correo electrónico"
+            type="email"
+            value={resetEmail}
+            onChange={(e) => setResetEmail(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <EmailIcon color="action" />
+                </InputAdornment>
+              )
+            }}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handlePasswordReset()
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button onClick={() => setResetDialogOpen(false)} disabled={resetLoading}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handlePasswordReset}
+            disabled={resetLoading || !resetEmail}
+            startIcon={resetLoading ? null : <EmailIcon />}
+          >
+            {resetLoading ? 'Enviando...' : 'Enviar Enlace'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

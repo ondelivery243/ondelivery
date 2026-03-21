@@ -1,4 +1,4 @@
-// firebase-messaging-sw.js
+// public/firebase-messaging-sw.js
 // Service Worker para Firebase Cloud Messaging
 // Este archivo permite recibir notificaciones cuando la app está en segundo plano
 
