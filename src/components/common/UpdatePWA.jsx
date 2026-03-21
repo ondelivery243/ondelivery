@@ -1,20 +1,18 @@
 // src/components/common/UpdatePWA.jsx
 // Componente para notificar y gestionar actualizaciones de la PWA
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Snackbar,
   Paper,
   Box,
   Typography,
   Button,
-  IconButton,
   Slide,
   CircularProgress,
   Chip
 } from '@mui/material'
 import {
   Refresh as RefreshIcon,
-  Close as CloseIcon,
   Download as DownloadIcon,
   CheckCircle as CheckIcon
 } from '@mui/icons-material'
@@ -33,37 +31,29 @@ export default function UpdatePWA() {
   const [offlineReady, setOfflineReady] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [updateComplete, setUpdateComplete] = useState(false)
-  const [registration, setRegistration] = useState(null)
+  
+  // Refs para evitar problemas de listeners duplicados
+  const updateServiceWorkerRef = useRef(null)
+  const timeoutRef = useRef(null)
 
   // Función para actualizar la PWA
-  const updateServiceWorker = useCallback(async () => {
-    if (!registration || !registration.waiting) {
-      // Si no hay SW esperando, recargar la página directamente
-      window.location.reload()
-      return
-    }
-
-    setUpdating(true)
-
-    try {
-      // Enviar mensaje al SW para que se active
-      registration.waiting.postMessage({ type: 'SKIP_WAITING' })
-
-      // Escuchar cuando el nuevo SW tome control
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        setUpdateComplete(true)
-        setUpdating(false)
-        setTimeout(() => {
-          window.location.reload()
-        }, 1000)
-      })
-    } catch (error) {
-      console.error('Error actualizando SW:', error)
-      setUpdating(false)
-      // Fallback: recargar la página
+  const updateServiceWorker = useCallback(() => {
+    if (updateServiceWorkerRef.current) {
+      setUpdating(true)
+      
+      // Timeout de seguridad: si después de 10 segundos no hay respuesta, recargar
+      timeoutRef.current = setTimeout(() => {
+        console.log('⏱️ Timeout de actualización, recargando...')
+        window.location.reload()
+      }, 10000)
+      
+      // Llamar a la función de actualización registrada por vite-plugin-pwa
+      updateServiceWorkerRef.current()
+    } else {
+      // Fallback: recargar directamente
       window.location.reload()
     }
-  }, [registration])
+  }, [])
 
   // Cerrar notificación
   const handleClose = useCallback(() => {
@@ -72,59 +62,86 @@ export default function UpdatePWA() {
     setUpdateComplete(false)
   }, [])
 
-  // Registrar eventos del Service Worker
+  // Registrar el Service Worker usando vite-plugin-pwa
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      // Escuchar cuando el SW está listo para actualizar
-      navigator.serviceWorker.ready.then((reg) => {
-        setRegistration(reg)
-
-        // Verificar si hay una actualización pendiente
-        reg.addEventListener('updatefound', () => {
-          const newWorker = reg.installing
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // Hay una nueva versión disponible
-                setNeedRefresh(true)
-              }
-            })
+      // Importar dinámicamente el módulo virtual de vite-plugin-pwa
+      import('virtual:pwa-register').then(({ registerSW }) => {
+        const updateSW = registerSW({
+          immediate: true,
+          
+          onNeedRefresh() {
+            console.log('🔄 Nueva versión disponible')
+            setNeedRefresh(true)
+          },
+          
+          onOfflineReady() {
+            console.log('📡 App lista para uso offline')
+            setOfflineReady(true)
+            // Auto-ocultar después de 3 segundos
+            setTimeout(() => setOfflineReady(false), 3000)
+          },
+          
+          onRegistered(registration) {
+            console.log('✅ Service Worker registrado')
+            
+            // Verificar si ya hay una actualización pendiente
+            if (registration?.waiting) {
+              setNeedRefresh(true)
+            }
+          },
+          
+          onRegisterError(error) {
+            console.error('❌ Error registrando SW:', error)
           }
         })
+        
+        // Guardar la función de actualización
+        updateServiceWorkerRef.current = updateSW
+      }).catch((error) => {
+        console.error('❌ Error importando virtual:pwa-register:', error)
+        
+        // Fallback: método manual si el virtual module no está disponible
+        navigator.serviceWorker.ready.then((reg) => {
+          if (reg.waiting) {
+            setNeedRefresh(true)
+          }
+          
+          // Escuchar actualizaciones
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing
+            if (newWorker) {
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  setNeedRefresh(true)
+                }
+              })
+            }
+          })
+        })
+      })
 
-        // Verificar si ya hay un SW esperando (actualización pendiente)
-        if (reg.waiting) {
-          setNeedRefresh(true)
+      // Escuchar cuando el nuevo SW toma control
+      const handleControllerChange = () => {
+        console.log('✅ Nuevo Service Worker activado')
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current)
         }
-      })
-
-      // Escuchar mensajes del SW
-      navigator.serviceWorker.addEventListener('message', (event) => {
-        if (event.data && event.data.type === 'SW_UPDATED') {
-          setNeedRefresh(true)
+        setUpdateComplete(true)
+        setUpdating(false)
+        setTimeout(() => {
+          window.location.reload()
+        }, 1000)
+      }
+      
+      navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange)
+      
+      return () => {
+        navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange)
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current)
         }
-      })
-
-      // Eventos de vite-plugin-pwa
-      window.addEventListener('sw-ready', () => {
-        console.log('✅ Service Worker listo')
-      })
-
-      window.addEventListener('sw-registered', (event) => {
-        console.log('✅ Service Worker registrado', event.detail)
-      })
-
-      window.addEventListener('sw-update-found', () => {
-        console.log('🔄 Nueva versión disponible')
-        setNeedRefresh(true)
-      })
-
-      window.addEventListener('sw-offline-ready', () => {
-        console.log('📡 App lista para uso offline')
-        setOfflineReady(true)
-        // Auto-ocultar después de 3 segundos
-        setTimeout(() => setOfflineReady(false), 3000)
-      })
+      }
     }
 
     // Guardar versión en localStorage para comparación

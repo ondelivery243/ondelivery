@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { SnackbarProvider } from 'notistack'
 import { Box, CircularProgress } from '@mui/material'
@@ -52,34 +52,65 @@ import RepartidorPerfil from './pages/repartidor/Perfil'
 // Componente para inicializar notificaciones
 const NotificationInitializer = () => {
   const { user } = useStore()
+  
+  // Refs para evitar inicialización duplicada
+  const initializedRef = useRef(false)
+  const currentUserIdRef = useRef(null)
+  const unsubscribeRef = useRef(null)
 
   useEffect(() => {
-    if (user?.uid) {
-      console.log('🔔 Inicializando notificaciones para:', user.uid)
-      
-      initializeNotifications(user.uid).then(result => {
-        if (result.success) {
-          console.log('✅ Notificaciones configuradas')
-        } else {
-          console.log('⚠️ Notificaciones no configuradas:', result.error || result.reason)
-        }
-      })
+    // Si no hay usuario, limpiar y salir
+    if (!user?.uid) {
+      initializedRef.current = false
+      currentUserIdRef.current = null
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current()
+        unsubscribeRef.current = null
+      }
+      return
+    }
 
-      const unsubscribe = onForegroundMessage((payload) => {
-        console.log('📩 Notificación recibida:', payload)
-        showLocalNotification(
-          payload.notification?.title || 'ON Delivery',
-          {
-            body: payload.notification?.body || '',
-            data: payload.data
-          }
-        )
-      })
+    // Si ya está inicializado para este usuario, no hacer nada
+    if (initializedRef.current && currentUserIdRef.current === user.uid) {
+      return
+    }
 
-      return () => {
-        if (unsubscribe && typeof unsubscribe === 'function') {
-          unsubscribe()
+    // Si cambió de usuario, limpiar la suscripción anterior
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current()
+      unsubscribeRef.current = null
+    }
+
+    // Marcar como inicializado para este usuario
+    currentUserIdRef.current = user.uid
+    
+    console.log('🔔 Inicializando notificaciones para:', user.uid)
+    
+    initializeNotifications(user.uid).then(result => {
+      if (result.success) {
+        console.log('✅ Notificaciones configuradas')
+        initializedRef.current = true
+      } else {
+        console.log('⚠️ Notificaciones no configuradas:', result.error || result.reason)
+      }
+    })
+
+    unsubscribeRef.current = onForegroundMessage((payload) => {
+      console.log('📩 Notificación recibida:', payload)
+      showLocalNotification(
+        payload.notification?.title || 'ON Delivery',
+        {
+          body: payload.notification?.body || '',
+          data: payload.data
         }
+      )
+    })
+
+    // Cleanup
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current()
+        unsubscribeRef.current = null
       }
     }
   }, [user?.uid])

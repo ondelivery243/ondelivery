@@ -112,20 +112,23 @@ export default function VersionFooter() {
               color: 'white'
             }}
           />
+          {/* CORREGIDO: span wrapper para Tooltip con botón deshabilitado */}
           <Tooltip title={checking ? "Buscando..." : "Buscar actualizaciones"}>
-            <IconButton
-              size="small"
-              onClick={checkForUpdates}
-              disabled={checking}
-              sx={{ ml: 0.5, width: 20, height: 20 }}
-            >
-              <RefreshIcon 
-                sx={{ 
-                  fontSize: 14,
-                  animation: checking ? 'spin 1s linear infinite' : 'none'
-                }} 
-              />
-            </IconButton>
+            <span>
+              <IconButton
+                size="small"
+                onClick={checkForUpdates}
+                disabled={checking}
+                sx={{ ml: 0.5, width: 20, height: 20 }}
+              >
+                <RefreshIcon 
+                  sx={{ 
+                    fontSize: 14,
+                    animation: checking ? 'spin 1s linear infinite' : 'none'
+                  }} 
+                />
+              </IconButton>
+            </span>
           </Tooltip>
         </Box>
 

@@ -199,16 +199,18 @@ export default function AdminDashboard() {
               </Box>
             </Stack>
 
-            {/* Botón Derecho (Condicional) */}
+            {/* Botón Derecho (Condicional) - CORREGIDO: span wrapper para Tooltip */}
             {mostrarBotonActualizar && (
-              <Tooltip title="Actualizar tasa desde API">
-                <IconButton 
-                  onClick={handleRefreshRate}
-                  disabled={refreshingRate}
-                  sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}
-                >
-                  {refreshingRate ? <CircularProgress size={24} color="inherit" /> : <RefreshIcon />}
-                </IconButton>
+              <Tooltip title={refreshingRate ? "Actualizando..." : "Actualizar tasa desde API"}>
+                <span>
+                  <IconButton 
+                    onClick={handleRefreshRate}
+                    disabled={refreshingRate}
+                    sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}
+                  >
+                    {refreshingRate ? <CircularProgress size={24} color="inherit" /> : <RefreshIcon />}
+                  </IconButton>
+                </span>
               </Tooltip>
             )}
             
