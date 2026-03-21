@@ -12,15 +12,12 @@ import {
   Chip,
   Stack,
   Paper,
-  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Alert,
   useTheme,
   useMediaQuery,
-  alpha,
   IconButton,
   CircularProgress,
   Menu,
@@ -33,7 +30,6 @@ import {
   Phone as PhoneIcon,
   Email as EmailIcon,
   TwoWheeler as BikeIcon,
-  Star as StarIcon,
   Edit as EditIcon,
   Camera as CameraIcon,
   CheckCircle as CheckIcon,
@@ -46,14 +42,11 @@ import {
   Delete as DeleteIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
-import { useStore, formatCurrency } from '../../store/useStore'
-import { 
-  getDriverByUserId, 
-  updateDriver
-} from '../../services/firestore'
+import { useStore } from '../../store/useStore'
+import { updateDriver, getDriverByUserId } from '../../services/firestore'
 import { updatePassword } from 'firebase/auth'
-import { auth } from '../../config/firebase'
-import { RatingWidget } from '../../components/rating'
+import { auth, db } from '../../config/firebase'
+import { doc, onSnapshot } from 'firebase/firestore'
 import { RIDERY_COLORS } from '../../theme/theme'
 
 // Función para subir imagen a ImgBB vía Netlify Function
@@ -119,25 +112,79 @@ export default function RepartidorPerfil() {
   
   const fileInputRef = useRef(null)
   const cameraInputRef = useRef(null)
+  const unsubscribeRef = useRef(null) // Referencia para la suscripción
+  const isMountedRef = useRef(true) // Flag para verificar si el componente está montado
 
-  // Cargar datos reales
+  // Suscripción en tiempo real a los datos del driver
   useEffect(() => {
-    const loadData = async () => {
-      if (!user?.uid) return
-      
+    isMountedRef.current = true
+
+    if (!user?.uid) {
+      setLoading(false)
+      return
+    }
+
+    const setupSubscription = async () => {
       setLoading(true)
       try {
+        // Primero obtener el driverId
         const driver = await getDriverByUserId(user.uid)
+        
+        // Verificar si el componente sigue montado
+        if (!isMountedRef.current) return
+        
+        if (!driver?.id) {
+          setLoading(false)
+          return
+        }
+
         setDriverData(driver)
+        setLoading(false)
+
+        // Luego suscribirse a cambios en tiempo real
+        const driverRef = doc(db, 'drivers', driver.id)
+        
+        unsubscribeRef.current = onSnapshot(driverRef, (docSnapshot) => {
+          // Verificar si el componente sigue montado antes de actualizar estado
+          if (!isMountedRef.current) return
+          
+          if (docSnapshot.exists()) {
+            setDriverData({ id: docSnapshot.id, ...docSnapshot.data() })
+          }
+        }, (error) => {
+          // Error de permisos silencioso - esperado durante logout
+          if (error.code === 'permission-denied') {
+            console.log('Suscripción cancelada (permisos)')
+            return
+          }
+          // Solo mostrar otros errores si el componente está montado
+          if (isMountedRef.current) {
+            console.error('Error en suscripción del driver:', error)
+          }
+        })
       } catch (error) {
+        // Verificar si el componente sigue montado
+        if (!isMountedRef.current) return
+        
         console.error('Error cargando datos:', error)
         enqueueSnackbar('Error al cargar los datos', { variant: 'error' })
+        setLoading(false)
       }
-      setLoading(false)
     }
-    
-    loadData()
-  }, [user])
+
+    setupSubscription()
+
+    // Cleanup: Cancelar suscripción y marcar como desmontado
+    return () => {
+      isMountedRef.current = false
+      
+      // Cancelar la suscripción de Firestore
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current()
+        unsubscribeRef.current = null
+      }
+    }
+  }, [user?.uid]) // Removido enqueueSnackbar de las dependencias para evitar re-suscripciones
 
   // Manejar selección de imagen desde archivo
   const handleFileSelect = (event) => {
@@ -286,12 +333,6 @@ export default function RepartidorPerfil() {
     setSaving(false)
   }
 
-  // Obtener icono del vehículo
-  const getVehicleIcon = (type) => {
-    if (type === 'bicicleta') return <BicycleIcon />
-    return <MopedIcon />
-  }
-
   // Obtener emoji del vehículo
   const getVehicleEmoji = (type) => {
     if (type === 'bicicleta') return '🚲'
@@ -437,37 +478,6 @@ export default function RepartidorPerfil() {
               )}
             </Box>
 
-            {/* Rating y stats */}
-            <Stack direction="row" spacing={3}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Stack direction="row" spacing={0.5} alignItems="center">
-                  <StarIcon sx={{ color: 'warning.main', fontSize: 20 }} />
-                  <Typography variant="h6" fontWeight="bold">
-                    {driverData?.rating?.toFixed(1) || '5.0'}
-                  </Typography>
-                </Stack>
-                <Typography variant="caption" color="text.secondary">
-                  Calificación
-                </Typography>
-              </Box>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" fontWeight="bold" color="success.main">
-                  {driverData?.totalServices || 0}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Servicios
-                </Typography>
-              </Box>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" fontWeight="bold" color="primary">
-                  {formatCurrency(driverData?.totalEarnings || 0)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Ganancias
-                </Typography>
-              </Box>
-            </Stack>
-
             {/* Status */}
             <Chip
               icon={driverData?.active ? <CheckIcon /> : <WarningIcon />}
@@ -478,15 +488,6 @@ export default function RepartidorPerfil() {
           </Box>
         </CardContent>
       </Card>
-
-      {/* Rating Widget - Solo si tiene calificaciones */}
-      {driverData?.id && driverData?.totalRatings > 0 && (
-        <RatingWidget
-          driverId={driverData.id}
-          driverData={driverData}
-          showReviews={true}
-        />
-      )}
 
       {/* Personal Info */}
       <Card sx={{ borderRadius: 2 }}>

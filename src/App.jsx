@@ -10,10 +10,14 @@ import { useStore } from './store/useStore'
 // Services
 import { initializeNotifications, onForegroundMessage, showLocalNotification } from './services/notifications'
 
+// Contexts
+import { DriverTrackingProvider } from './contexts/DriverTrackingContext'
+
 // Components
 import ErrorBoundary from './components/common/ErrorBoundary'
 import SplashScreen from './components/common/SplashScreen'
 import InstallPWA from './components/common/InstallPWA'
+import UpdatePWA from './components/common/UpdatePWA'
 
 // Pages
 import Landing from './pages/Landing'
@@ -53,7 +57,6 @@ const NotificationInitializer = () => {
     if (user?.uid) {
       console.log('🔔 Inicializando notificaciones para:', user.uid)
       
-      // Inicializar notificaciones
       initializeNotifications(user.uid).then(result => {
         if (result.success) {
           console.log('✅ Notificaciones configuradas')
@@ -62,7 +65,6 @@ const NotificationInitializer = () => {
         }
       })
 
-      // Escuchar mensajes en primer plano
       const unsubscribe = onForegroundMessage((payload) => {
         console.log('📩 Notificación recibida:', payload)
         showLocalNotification(
@@ -98,7 +100,6 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    // Redirigir al dashboard correspondiente según el rol
     const dashboardRoutes = {
       admin: '/admin',
       restaurante: '/restaurante',
@@ -123,70 +124,73 @@ function App() {
         maxSnack={3} 
         anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <NotificationInitializer />
-        <Routes>
-          {/* Public */}
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/registro/repartidor" element={<Register />} />
-          <Route path="/registro/restaurante" element={<RegisterRestaurant />} />
-          
-          {/* Admin */}
-          <Route 
-            path="/admin" 
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <AdminLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<AdminDashboard />} />
-            <Route path="restaurantes" element={<AdminRestaurantes />} />
-            <Route path="repartidores" element={<AdminRepartidores />} />
-            <Route path="zonas" element={<AdminZonas />} />
-            <Route path="servicios" element={<AdminServicios />} />
-            <Route path="liquidaciones" element={<AdminLiquidaciones />} />
-            <Route path="reportes" element={<AdminReportes />} />
-            <Route path="configuracion" element={<AdminConfiguracion />} />
-          </Route>
-          
-          {/* Restaurante */}
-          <Route 
-            path="/restaurante" 
-            element={
-              <ProtectedRoute allowedRoles={['restaurante']}>
-                <RestauranteLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<RestauranteDashboard />} />
-            <Route path="historial" element={<RestauranteHistorial />} />
-            <Route path="liquidacion" element={<RestauranteLiquidacion />} />
-            <Route path="perfil" element={<RestaurantePerfil />} />
-          </Route>
-          
-          {/* Repartidor */}
-          <Route 
-            path="/repartidor" 
-            element={
-              <ProtectedRoute allowedRoles={['repartidor']}>
-                <RepartidorLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<RepartidorDashboard />} />
-            <Route path="historial" element={<RepartidorHistorial />} />
-            <Route path="perfil" element={<RepartidorPerfil />} />
-          </Route>
-          
-          {/* 404 */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <DriverTrackingProvider>
+          <NotificationInitializer />
+          <Routes>
+            {/* Public */}
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/registro/repartidor" element={<Register />} />
+            <Route path="/registro/restaurante" element={<RegisterRestaurant />} />
+            
+            {/* Admin */}
+            <Route 
+              path="/admin" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="restaurantes" element={<AdminRestaurantes />} />
+              <Route path="repartidores" element={<AdminRepartidores />} />
+              <Route path="zonas" element={<AdminZonas />} />
+              <Route path="servicios" element={<AdminServicios />} />
+              <Route path="liquidaciones" element={<AdminLiquidaciones />} />
+              <Route path="reportes" element={<AdminReportes />} />
+              <Route path="configuracion" element={<AdminConfiguracion />} />
+            </Route>
+            
+            {/* Restaurante */}
+            <Route 
+              path="/restaurante" 
+              element={
+                <ProtectedRoute allowedRoles={['restaurante']}>
+                  <RestauranteLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<RestauranteDashboard />} />
+              <Route path="historial" element={<RestauranteHistorial />} />
+              <Route path="liquidacion" element={<RestauranteLiquidacion />} />
+              <Route path="perfil" element={<RestaurantePerfil />} />
+            </Route>
+            
+            {/* Repartidor */}
+            <Route 
+              path="/repartidor" 
+              element={
+                <ProtectedRoute allowedRoles={['repartidor']}>
+                  <RepartidorLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<RepartidorDashboard />} />
+              <Route path="historial" element={<RepartidorHistorial />} />
+              <Route path="perfil" element={<RepartidorPerfil />} />
+            </Route>
+            
+            {/* 404 */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </DriverTrackingProvider>
         
         <InstallPWA />
+        <UpdatePWA />
       </SnackbarProvider>
     </ErrorBoundary>
   )

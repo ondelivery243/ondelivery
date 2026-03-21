@@ -25,11 +25,44 @@ import {
   AttachMoney as MoneyIcon,
   Receipt as ReceiptIcon,
   CheckCircle as CheckIcon,
-  AccessTime as ClockIcon
+  AccessTime as ClockIcon,
+  Inventory as PackageIcon
 } from '@mui/icons-material'
 import { formatCurrency, formatDate, useRestaurantStore, useStore } from '../../store/useStore'
 import { subscribeToSettlements, subscribeToRestaurantServices, getRestaurantByUserId, getRestaurant } from '../../services/firestore'
 import { RIDERY_COLORS } from '../../theme/theme'
+
+// ============================================
+// 📅 FUNCIONES DE MANEJO SEMANAL
+// ============================================
+
+// Obtener lunes de la semana
+const getMonday = (date) => {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  return new Date(d.setDate(diff))
+}
+
+// Obtener domingo de la semana
+const getSunday = (monday) => {
+  const d = new Date(monday)
+  d.setDate(d.getDate() + 6)
+  return d
+}
+
+// Formatear rango de semana
+const formatWeekRange = (monday) => {
+  const sunday = getSunday(monday)
+  const options = { day: '2-digit', month: 'short' }
+  return monday.toLocaleDateString('es-VE', options) + ' - ' + sunday.toLocaleDateString('es-VE', options)
+}
+
+// Obtener la semana actual
+const getCurrentWeekId = () => {
+  const monday = getMonday(new Date())
+  return monday.toISOString().split('T')[0]
+}
 
 export default function RestauranteLiquidacion() {
   const theme = useTheme()
@@ -43,6 +76,7 @@ export default function RestauranteLiquidacion() {
   const [totalPaid, setTotalPaid] = useState(0)
   const [loading, setLoading] = useState(true)
   const currentYear = new Date().getFullYear()
+  const currentWeekId = getCurrentWeekId()
 
   // Cargar datos en tiempo real
   useEffect(() => {
@@ -108,6 +142,43 @@ export default function RestauranteLiquidacion() {
     return isDelivered && !settledField
   })
 
+  // Calcular total de la semana actual
+  const getWeekTotal = () => {
+    const monday = new Date(currentWeekId)
+    monday.setHours(0, 0, 0, 0)
+    
+    const sunday = getSunday(monday)
+    sunday.setHours(23, 59, 59, 999)
+    
+    return services
+      .filter(s => {
+        const isDelivered = s.status === 'entregado'
+        const createdAt = s.createdAt?.toDate?.()
+        const inWeek = createdAt && createdAt >= monday && createdAt <= sunday
+        return isDelivered && inWeek
+      })
+      .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+  }
+
+  // Calcular servicios de la semana actual
+  const getWeekServicesCount = () => {
+    const monday = new Date(currentWeekId)
+    monday.setHours(0, 0, 0, 0)
+    
+    const sunday = getSunday(monday)
+    sunday.setHours(23, 59, 59, 999)
+    
+    return services.filter(s => {
+      const isDelivered = s.status === 'entregado'
+      const createdAt = s.createdAt?.toDate?.()
+      return isDelivered && createdAt && createdAt >= monday && createdAt <= sunday
+    }).length
+  }
+
+  const weekTotal = getWeekTotal()
+  const weekServicesCount = getWeekServicesCount()
+  const currentWeekRange = formatWeekRange(getMonday(new Date()))
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -144,6 +215,58 @@ export default function RestauranteLiquidacion() {
           Estado de pagos y liquidaciones
         </Typography>
       </Box>
+
+      {/* Tarjeta de Semana Actual */}
+      <Card sx={{ borderRadius: 2, bgcolor: alpha(theme.palette.primary.main, 0.1), border: 1, borderColor: 'primary.main' }}>
+        <CardContent sx={{ p: 2 }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                Semana Actual
+              </Typography>
+              <Typography variant="body2" fontWeight="bold" color="primary.main">
+                {currentWeekRange}
+              </Typography>
+            </Box>
+            <Chip 
+              icon={<ClockIcon />} 
+              label="En curso" 
+              color="primary" 
+              size="small" 
+            />
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {/* Stats Cards - Esta Semana */}
+      <Grid container spacing={2}>
+        <Grid item xs={6}>
+          <Card sx={{ borderRadius: 2, bgcolor: 'info.light', height: '100%' }}>
+            <CardContent sx={{ p: 2, textAlign: 'center' }}>
+              <MoneyIcon sx={{ color: 'info.main', mb: 0.5 }} />
+              <Typography variant="h5" fontWeight="bold" color="info.dark">
+                {formatCurrency(weekTotal)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Pagado Esta Semana
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6}>
+          <Card sx={{ borderRadius: 2, bgcolor: 'success.light', height: '100%' }}>
+            <CardContent sx={{ p: 2, textAlign: 'center' }}>
+              <PackageIcon sx={{ color: 'success.main', mb: 0.5 }} />
+              <Typography variant="h5" fontWeight="bold" color="success.dark">
+                {weekServicesCount}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Servicios Esta Semana
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
       {/* Summary Cards */}
       <Grid container spacing={2}>

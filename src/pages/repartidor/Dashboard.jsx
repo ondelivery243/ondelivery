@@ -49,39 +49,33 @@ import {
   ExpandLess as CollapseIcon,
   Chat as ChatIcon,
   MyLocation as MyLocationIcon,
-  Info as InfoIcon,
   Timer as TimerIcon,
   Notifications as NotificationIcon,
   Close as CloseIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
+import { doc, onSnapshot, collection, query, where, orderBy, limit } from 'firebase/firestore'
+import { db } from '../../config/firebase'
 import { useStore, useDriverStore, formatCurrency } from '../../store/useStore'
 import { 
-  subscribeToPendingServices, 
-  subscribeToDriverServices,
-  acceptService,
   startService,
   completeService,
-  setDriverOnline,
-  getDriverStats,
-  getDriverByUserId,
   getSettings
 } from '../../services/firestore'
-import { useDriverTracking } from '../../hooks/useDriverTracking'
+import { useDriverTracking } from '../../contexts/DriverTrackingContext'
 import LiveMap from '../../components/tracking/LiveMap'
 import { ChatButton } from '../../components/chat'
-import { RIDERY_COLORS } from '../../theme/theme'
 import { useAvailableServices } from '../../hooks/useAvailableServices'
 import { subscribeToChatRoom } from '../../services/chatService'
 import { BROADCAST_CONFIG } from '../../services/broadcastService'
+import VersionFooter from '../../components/common/VersionFooter'
 
 // ============================================
-// 🔊 SISTEMA DE SONIDOS - SOLO 2 ALERTAS
+// 🔊 SISTEMA DE SONIDOS
 // ============================================
 let audioContextInstance = null
 let alertIntervalId = null
 
-// Inicializar AudioContext (requiere interacción del usuario)
 const initAudioContext = () => {
   if (!audioContextInstance || audioContextInstance.state === 'closed') {
     audioContextInstance = new (window.AudioContext || window.webkitAudioContext)()
@@ -92,97 +86,62 @@ const initAudioContext = () => {
   return audioContextInstance
 }
 
-// 🔔 SONIDO 1: NUEVO SERVICIO - Fuerte, urgente, repetitivo
 const playNewServiceSound = () => {
   try {
     const ctx = initAudioContext()
     const now = ctx.currentTime
-
-    // Patrón de 4 tonos urgentes estilo alerta
     const notes = [
-      { freq: 880, time: 0, duration: 0.12 },      // A5
-      { freq: 1100, time: 0.15, duration: 0.12 },  // C#6
-      { freq: 880, time: 0.30, duration: 0.12 },   // A5
-      { freq: 1320, time: 0.45, duration: 0.15 }   // E6
+      { freq: 880, time: 0, duration: 0.12 },
+      { freq: 1100, time: 0.15, duration: 0.12 },
+      { freq: 880, time: 0.30, duration: 0.12 },
+      { freq: 1320, time: 0.45, duration: 0.15 }
     ]
-
     notes.forEach(note => {
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
-      
-      osc.type = 'square'  // Sonido más penetrante
+      osc.type = 'square'
       osc.frequency.setValueAtTime(note.freq, now + note.time)
-      
       gain.gain.setValueAtTime(0.35, now + note.time)
       gain.gain.exponentialRampToValueAtTime(0.01, now + note.time + note.duration)
-      
       osc.connect(gain)
       gain.connect(ctx.destination)
-      
       osc.start(now + note.time)
       osc.stop(now + note.time + note.duration)
     })
-
-    console.log('🔔 Sonido de NUEVO SERVICIO reproducido')
-  } catch (e) {
-    console.log('❌ Error sonido nuevo servicio:', e.message)
-  }
+  } catch (e) {}
 }
 
-// Iniciar alerta continua para nuevo servicio
 const startServiceAlert = () => {
-  if (alertIntervalId) return // Ya está sonando
-  
-  console.log('🔔 Iniciando alerta CONTINUA de nuevo servicio')
-  
-  // Sonar inmediatamente
+  if (alertIntervalId) return
   playNewServiceSound()
-  
-  // Repetir cada 3 segundos
-  alertIntervalId = setInterval(() => {
-    playNewServiceSound()
-  }, 3000)
+  alertIntervalId = setInterval(playNewServiceSound, 3000)
 }
 
-// Detener alerta continua
 const stopServiceAlert = () => {
   if (alertIntervalId) {
-    console.log('🔇 Deteniendo alerta de servicio')
     clearInterval(alertIntervalId)
     alertIntervalId = null
   }
 }
 
-// 💬 SONIDO 2: NUEVO MENSAJE DE CHAT - "Ding" simple
 const playChatMessageSound = () => {
   try {
     const ctx = initAudioContext()
     const now = ctx.currentTime
-
-    // Sonido tipo "ding" suave pero audible
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
-    
     osc.type = 'sine'
-    osc.frequency.setValueAtTime(1200, now)        // Re6
-    osc.frequency.exponentialRampToValueAtTime(800, now + 0.15)  // Desciende
-    
+    osc.frequency.setValueAtTime(1200, now)
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.15)
     gain.gain.setValueAtTime(0.3, now)
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2)
-    
     osc.connect(gain)
     gain.connect(ctx.destination)
-    
     osc.start(now)
     osc.stop(now + 0.25)
-
-    console.log('💬 Sonido de MENSAJE DE CHAT reproducido')
-  } catch (e) {
-    console.log('❌ Error sonido chat:', e.message)
-  }
+  } catch (e) {}
 }
 
-// Inicializar audio en la primera interacción
 const initAudioOnFirstInteraction = () => {
   initAudioContext()
   document.removeEventListener('click', initAudioOnFirstInteraction)
@@ -196,7 +155,10 @@ if (typeof document !== 'undefined') {
   document.addEventListener('keydown', initAudioOnFirstInteraction, { once: true })
 }
 
-// Función helper para calcular ganancias
+// ============================================
+// UTILIDADES
+// ============================================
+
 const calculateDriverEarnings = (service, commissionRate = 20) => {
   if (service.driverEarnings !== undefined && service.driverEarnings !== null) {
     return service.driverEarnings
@@ -206,27 +168,45 @@ const calculateDriverEarnings = (service, commissionRate = 20) => {
   return deliveryFee * (1 - rate / 100)
 }
 
-// Función helper para formatear fechas
 const formatDate = (timestamp) => {
   if (!timestamp) return '--'
-  
   const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp)
   const now = new Date()
   const diffMs = now - date
   const diffMins = Math.floor(diffMs / 60000)
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
-  
   if (diffMins < 1) return 'Ahora'
   if (diffMins < 60) return `Hace ${diffMins}m`
   if (diffHours < 24) return `Hace ${diffHours}h`
   if (diffDays < 7) return `Hace ${diffDays}d`
-  
   return date.toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })
 }
 
+// Obtener lunes de la semana actual
+const getCurrentWeekMonday = () => {
+  const today = new Date()
+  const day = today.getDay()
+  const diff = today.getDate() - day + (day === 0 ? -6 : 1)
+  const monday = new Date(today.setDate(diff))
+  monday.setHours(0, 0, 0, 0)
+  return monday
+}
+
+// Verificar si un servicio está en la semana actual
+const isInCurrentWeek = (timestamp) => {
+  if (!timestamp) return false
+  const monday = getCurrentWeekMonday()
+  const sunday = new Date(monday)
+  sunday.setDate(sunday.getDate() + 6)
+  sunday.setHours(23, 59, 59, 999)
+  
+  const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp)
+  return date >= monday && date <= sunday
+}
+
 // ============================================
-// COMPONENTE: TARJETA DE SERVICIO BROADCAST
+// COMPONENTE: TARJETA BROADCAST
 // ============================================
 const BroadcastNotificationCard = ({ 
   service, 
@@ -240,19 +220,11 @@ const BroadcastNotificationCard = ({
   const theme = useTheme()
 
   const totalTime = BROADCAST_CONFIG.WINDOW_DURATION
-  const progress = useMemo(() => {
-    return Math.max(0, Math.min(100, (timeRemaining / totalTime) * 100))
-  }, [timeRemaining, totalTime])
+  const progress = useMemo(() => Math.max(0, Math.min(100, (timeRemaining / totalTime) * 100)), [timeRemaining, totalTime])
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setTimeRemaining(prev => {
-        if (prev <= 1000) {
-          clearInterval(timer)
-          return 0
-        }
-        return prev - 1000
-      })
+      setTimeRemaining(prev => prev <= 1000 ? 0 : prev - 1000)
     }, 1000)
     return () => clearInterval(timer)
   }, [])
@@ -280,18 +252,19 @@ const BroadcastNotificationCard = ({
 
   const handleAccept = () => {
     setIsExiting(true)
-    stopServiceAlert() // Detener sonido al aceptar
+    stopServiceAlert()
     setTimeout(() => onAccept?.(service.serviceId || service.id), 200)
   }
 
   const handleReject = () => {
     setIsExiting(true)
-    stopServiceAlert() // Detener sonido al rechazar
+    stopServiceAlert()
     setTimeout(() => onReject?.(service.serviceId || service.id), 200)
   }
 
   useEffect(() => {
     if (timeRemaining === 0 && !isExiting) handleReject()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeRemaining])
 
   return (
@@ -306,7 +279,6 @@ const BroadcastNotificationCard = ({
         boxShadow: '0 8px 32px rgba(0, 217, 255, 0.15)'
       }}>
         <LinearProgress variant="determinate" value={progress} color={getProgressColor()} sx={{ height: 6 }} />
-        
         <CardContent sx={{ p: 2.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -349,29 +321,15 @@ const BroadcastNotificationCard = ({
           </Box>
 
           <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-            <Button 
-              variant="outlined" 
-              fullWidth 
-              onClick={handleReject} 
-              disabled={isAccepting || timeRemaining === 0}
-              sx={{ 
-                py: 1.5, 
-                borderColor: theme.palette.error.main, 
-                color: theme.palette.error.main,
-                '&:hover': { borderColor: theme.palette.error.dark, backgroundColor: alpha(theme.palette.error.main, 0.1) }
-              }}
-            >
+            <Button variant="outlined" fullWidth onClick={handleReject} disabled={isAccepting || timeRemaining === 0}
+              sx={{ py: 1.5, borderColor: theme.palette.error.main, color: theme.palette.error.main,
+                '&:hover': { borderColor: theme.palette.error.dark, backgroundColor: alpha(theme.palette.error.main, 0.1) } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CancelIcon fontSize="small" /> Rechazar
               </Box>
             </Button>
-            <Button 
-              variant="contained" 
-              fullWidth 
-              onClick={handleAccept} 
-              disabled={isAccepting || timeRemaining === 0}
-              sx={{ py: 1.5, backgroundColor: theme.palette.success.main, color: '#000', fontWeight: 'bold', fontSize: '1rem' }}
-            >
+            <Button variant="contained" fullWidth onClick={handleAccept} disabled={isAccepting || timeRemaining === 0}
+              sx={{ py: 1.5, backgroundColor: theme.palette.success.main, color: '#000', fontWeight: 'bold', fontSize: '1rem' }}>
               {isAccepting ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <CircularProgress size={16} color="inherit" /> Aceptando...
@@ -383,10 +341,6 @@ const BroadcastNotificationCard = ({
               )}
             </Button>
           </Stack>
-
-          <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: 'rgba(255,255,255,0.5)', textAlign: 'center', fontStyle: 'italic' }}>
-            La dirección exacta se mostrará al aceptar
-          </Typography>
         </CardContent>
       </Card>
     </Fade>
@@ -401,13 +355,20 @@ export default function RepartidorDashboard() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const { enqueueSnackbar } = useSnackbar()
   const { user } = useStore()
-  const { isOnline, setIsOnline, currentService, setCurrentService } = useDriverStore()
+  const { currentService, setCurrentService } = useDriverStore()
   
-  const [pendingServices, setPendingServices] = useState([])
   const [myServices, setMyServices] = useState([])
-  const [stats, setStats] = useState(null)
+  const [stats, setStats] = useState({ 
+    totalEarnings: 0, 
+    totalServices: 0, 
+    todayEarnings: 0, 
+    todayServices: 0,
+    weekEarnings: 0,
+    weekServices: 0,
+    avgRating: 5.0,
+    ratingCount: 0
+  })
   const [loading, setLoading] = useState(false)
-  const [selectedService, setSelectedService] = useState(null)
   const [confirmDialog, setConfirmDialog] = useState({ open: false, type: '', service: null })
   const [driverData, setDriverData] = useState(null)
   const [showMap, setShowMap] = useState(false)
@@ -416,18 +377,27 @@ export default function RepartidorDashboard() {
   const [appSettings, setAppSettings] = useState({ commissionRate: 20, minDeliveryFee: 1.50 })
   const [useBroadcast, setUseBroadcast] = useState(true)
   
-  // Refs para control de notificaciones
   const prevServicesCountRef = useRef(0)
   const chatPrevUnreadRef = useRef(0)
   const chatOpenRef = useRef(false)
 
-  // Hook de tracking GPS
   const {
-    isTracking, currentLocation, error: gpsError, permissionStatus,
-    startTracking, stopTracking, forceGetLocation
-  } = useDriverTracking(driverData, currentService)
+    isTracking, 
+    currentLocation, 
+    error: gpsError, 
+    permissionStatus,
+    goOnline, 
+    goOffline, 
+    forceGetLocation, 
+    isOnline: contextIsOnline
+  } = useDriverTracking()
 
-  // Hook para servicios broadcast
+  const { setIsOnline } = useDriverStore()
+  
+  useEffect(() => {
+    setIsOnline(contextIsOnline)
+  }, [contextIsOnline, setIsOnline])
+
   const {
     availableServices: broadcastServices,
     loading: broadcastLoading,
@@ -435,23 +405,135 @@ export default function RepartidorDashboard() {
     acceptService: acceptBroadcastService,
     rejectService: rejectBroadcastService,
     hasAvailableServices: hasBroadcastServices
-  } = useAvailableServices(driverData?.id, currentLocation, isOnline && useBroadcast)
+  } = useAvailableServices(driverData?.id, currentLocation, contextIsOnline && useBroadcast)
 
-  // 🔔 DETECTAR NUEVOS SERVICIOS Y ACTIVAR ALERTA CONTINUA
+  // ============================================
+  // ✅ SUSCRIPCIÓN AL DRIVER (solo datos básicos)
+  // ============================================
+  useEffect(() => {
+    if (!user?.driverId) return
+
+    const driverRef = doc(db, 'drivers', user.driverId)
+    
+    const unsubscribe = onSnapshot(driverRef, (doc) => {
+      if (doc.exists()) {
+        const data = doc.data()
+        setDriverData({ id: doc.id, ...data })
+      } else {
+        setDriverData(null)
+      }
+    })
+
+    return () => unsubscribe()
+  }, [user?.driverId])
+
+  // ============================================
+  // ✅ SUSCRIPCIÓN A SERVICIOS - CALCULAR STATS REALES
+  // ============================================
+  useEffect(() => {
+    if (!driverData?.id) return
+
+    const servicesQuery = query(
+      collection(db, 'services'),
+      where('driverId', '==', driverData.id),
+      orderBy('createdAt', 'desc'),
+      limit(200)
+    )
+    
+    const unsubscribe = onSnapshot(servicesQuery, (snapshot) => {
+      const services = []
+      
+      // Stats totales
+      let totalEarnings = 0
+      let totalServices = 0
+      let ratingSum = 0
+      let ratingCount = 0
+      
+      // Stats de hoy
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      let todayEarnings = 0
+      let todayServices = 0
+      
+      // Stats de la SEMANA actual
+      const weekMonday = getCurrentWeekMonday()
+      const weekSunday = new Date(weekMonday)
+      weekSunday.setDate(weekSunday.getDate() + 6)
+      weekSunday.setHours(23, 59, 59, 999)
+      let weekEarnings = 0
+      let weekServices = 0
+
+      snapshot.forEach((doc) => {
+        const data = { id: doc.id, ...doc.data() }
+        services.push(data)
+        
+        // Solo contar servicios ENTREGADOS
+        if (data.status === 'entregado') {
+          totalServices++
+          const earnings = calculateDriverEarnings(data, appSettings.commissionRate)
+          totalEarnings += earnings
+          
+          // Rating
+          if (data.driverRating && data.driverRating > 0) {
+            ratingSum += data.driverRating
+            ratingCount++
+          }
+          
+          // Estadísticas de hoy
+          const completedDate = data.completedAt?.toDate?.() || new Date(data.completedAt)
+          if (completedDate >= today) {
+            todayServices++
+            todayEarnings += earnings
+          }
+          
+          // Estadísticas de la semana
+          if (completedDate >= weekMonday && completedDate <= weekSunday) {
+            weekServices++
+            weekEarnings += earnings
+          }
+        }
+      })
+
+      // Rating promedio
+      const avgRating = ratingCount > 0 ? ratingSum / ratingCount : 5.0
+
+      console.log('📊 Stats calculados:', {
+        totalServices,
+        totalEarnings: totalEarnings.toFixed(2),
+        weekServices,
+        weekEarnings: weekEarnings.toFixed(2),
+        avgRating: avgRating.toFixed(1),
+        ratingCount
+      })
+      
+      setMyServices(services)
+      setStats({
+        totalEarnings,
+        totalServices,
+        todayEarnings,
+        todayServices,
+        weekEarnings,
+        weekServices,
+        avgRating,
+        ratingCount
+      })
+      
+      // Servicio activo
+      const active = services.find(s => s.status === 'asignado' || s.status === 'en_camino')
+      setCurrentService(active || null)
+    })
+
+    return () => unsubscribe()
+  }, [driverData?.id, appSettings.commissionRate, setCurrentService])
+
+  // Detectar nuevos servicios
   useEffect(() => {
     const currentCount = broadcastServices.length
     const prevCount = prevServicesCountRef.current
 
     if (currentCount > 0 && prevCount === 0) {
-      // Llegó nuevo servicio - INICIAR ALERTA CONTINUA
       startServiceAlert()
-      
-      // Vibrar
-      if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200, 100, 200])
-      }
-      
-      // Notificación del sistema
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200])
       if (Notification.permission === 'granted') {
         try {
           new Notification('🚴 ¡Nuevo servicio disponible!', {
@@ -463,14 +545,13 @@ export default function RepartidorDashboard() {
         } catch (e) {}
       }
     } else if (currentCount === 0 && prevCount > 0) {
-      // Ya no hay servicios - DETENER ALERTA
       stopServiceAlert()
     }
 
     prevServicesCountRef.current = currentCount
   }, [broadcastServices.length])
 
-  // 💬 SUSCRIPCIÓN A CHAT - Sonido cuando llega mensaje del restaurante
+  // Chat
   useEffect(() => {
     if (!currentService?.id) {
       chatPrevUnreadRef.current = 0
@@ -481,18 +562,11 @@ export default function RepartidorDashboard() {
       if (room && !chatOpenRef.current) {
         const unreadCount = room.unreadByDriver || 0
         const prevCount = chatPrevUnreadRef.current
-
-        // Detectar nuevo mensaje (aumentó el contador y no es la primera carga)
         if (unreadCount > prevCount && prevCount > 0) {
           playChatMessageSound()
-          
-          if (navigator.vibrate) {
-            navigator.vibrate([100, 50, 100])
-          }
-          
+          if (navigator.vibrate) navigator.vibrate([100, 50, 100])
           enqueueSnackbar('💬 Nuevo mensaje del restaurante', { variant: 'info', autoHideDuration: 3000 })
         }
-
         chatPrevUnreadRef.current = unreadCount
       }
     })
@@ -500,7 +574,7 @@ export default function RepartidorDashboard() {
     return () => unsubscribe()
   }, [currentService?.id, enqueueSnackbar])
 
-  // Cargar configuración
+  // Configuración
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -518,78 +592,7 @@ export default function RepartidorDashboard() {
     loadSettings()
   }, [])
 
-  // Cargar datos del repartidor - SIEMPRE INICIAR OFFLINE
-  useEffect(() => {
-    const loadDriverData = async () => {
-      if (user?.uid) {
-        const driver = await getDriverByUserId(user.uid)
-        setDriverData(driver)
-        setIsOnline(false)
-        
-        if (driver?.id) {
-          try {
-            await setDriverOnline(driver.id, false)
-            console.log('✅ Driver iniciado como OFFLINE')
-          } catch (e) {
-            console.log('⚠️ Error seteando offline inicial:', e.message)
-          }
-        }
-      }
-    }
-    loadDriverData()
-  }, [user, setIsOnline])
-
-  // Suscribirse a servicios pendientes (backup)
-  useEffect(() => {
-    if (!isOnline || !driverData?.id || useBroadcast) return
-    
-    const unsubscribe = subscribeToPendingServices((services) => {
-      const available = services.filter(s => !s.driverId)
-      setPendingServices(available)
-      
-      if (available.length > 0 && !currentService) {
-        playNewServiceSound()
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200])
-        
-        try {
-          if (Notification.permission === 'granted') {
-            new Notification('¡Nuevo servicio disponible!', {
-              body: `Tienes ${available.length} servicio(s) esperando`,
-              icon: '/logo-192.png'
-            })
-          }
-        } catch (e) {}
-      }
-    })
-    
-    return () => unsubscribe()
-  }, [isOnline, driverData, currentService, useBroadcast])
-
-  // Suscribirse a mis servicios
-  useEffect(() => {
-    if (!driverData?.id) return
-    
-    const unsubscribe = subscribeToDriverServices(driverData.id, (services) => {
-      setMyServices(services)
-      const active = services.find(s => s.status === 'asignado' || s.status === 'en_camino')
-      setCurrentService(active || null)
-    })
-    
-    return () => unsubscribe()
-  }, [driverData, setCurrentService])
-
-  // Cargar estadísticas
-  const loadStats = useCallback(async () => {
-    if (!driverData?.id) return
-    const statsData = await getDriverStats(driverData.id)
-    setStats(statsData)
-  }, [driverData])
-
-  useEffect(() => {
-    loadStats()
-  }, [loadStats, myServices])
-
-  // Toggle online/offline
+  // Handlers
   const handleToggleOnline = async () => {
     if (!driverData?.id) {
       enqueueSnackbar('Error: No se encontró tu perfil', { variant: 'error' })
@@ -599,22 +602,15 @@ export default function RepartidorDashboard() {
     setLoading(true)
     
     try {
-      const newOnlineState = !isOnline
-      const result = await setDriverOnline(driverData.id, newOnlineState)
-      
-      if (result.success) {
-        setIsOnline(newOnlineState)
-        
-        if (newOnlineState) {
-          await startTracking()
-          enqueueSnackbar('¡Estás en línea! Recibirás servicios en tu zona', { variant: 'success' })
-        } else {
-          await stopTracking()
-          stopServiceAlert() // Detener sonido al salir
+      if (!contextIsOnline) {
+        const success = await goOnline()
+        if (success) enqueueSnackbar('¡Estás en línea!', { variant: 'success' })
+      } else {
+        const success = await goOffline()
+        if (success) {
+          stopServiceAlert()
           enqueueSnackbar('Saliste del sistema', { variant: 'info' })
         }
-      } else {
-        enqueueSnackbar('Error al cambiar estado', { variant: 'error' })
       }
     } catch (error) {
       console.error('Error:', error)
@@ -632,41 +628,21 @@ export default function RepartidorDashboard() {
 
   const handleAcceptBroadcastService = async (serviceId) => {
     if (!driverData?.id) return
-    
     const result = await acceptBroadcastService(serviceId, driverData.name || user?.name)
-    
     if (result.success) {
-      enqueueSnackbar('¡Servicio aceptado! Dirígete al restaurante', { variant: 'success' })
+      enqueueSnackbar('¡Servicio aceptado!', { variant: 'success' })
     } else {
-      enqueueSnackbar(result.error || 'No se pudo aceptar el servicio', { variant: 'error' })
+      enqueueSnackbar(result.error || 'No se pudo aceptar', { variant: 'error' })
     }
   }
 
   const handleRejectBroadcastService = async (serviceId) => {
     if (!driverData?.id) return
-    
     const result = await rejectBroadcastService(serviceId)
-    
     if (result.success) {
       enqueueSnackbar('Servicio rechazado', { variant: 'info' })
     } else {
-      enqueueSnackbar(result.error || 'No se pudo rechazar el servicio', { variant: 'error' })
-    }
-  }
-
-  const handleAcceptService = async (service) => {
-    if (!driverData?.id) return
-    
-    setLoading(true)
-    const result = await acceptService(service.id, driverData.id, driverData.name || user?.name)
-    setLoading(false)
-    
-    if (result.success) {
-      enqueueSnackbar('¡Servicio aceptado!', { variant: 'success' })
-      setSelectedService(null)
-      setPendingServices(prev => prev.filter(s => s.id !== service.id))
-    } else {
-      enqueueSnackbar(result.error || 'Error al aceptar', { variant: 'error' })
+      enqueueSnackbar(result.error || 'No se pudo rechazar', { variant: 'error' })
     }
   }
 
@@ -674,7 +650,6 @@ export default function RepartidorDashboard() {
     setLoading(true)
     const result = await startService(service.id)
     setLoading(false)
-    
     if (result.success) {
       enqueueSnackbar('¡Viaje iniciado!', { variant: 'success' })
     } else {
@@ -687,7 +662,6 @@ export default function RepartidorDashboard() {
     const earnings = calculateDriverEarnings(service, appSettings.commissionRate)
     const result = await completeService(service.id, earnings)
     setLoading(false)
-    
     if (result.success) {
       enqueueSnackbar(`¡Completado! Ganaste ${formatCurrency(earnings)}`, { variant: 'success' })
       setConfirmDialog({ open: false, type: '', service: null })
@@ -715,7 +689,6 @@ export default function RepartidorDashboard() {
   }
 
   const gpsState = getGpsState()
-  const currentYear = new Date().getFullYear()
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -726,41 +699,45 @@ export default function RepartidorDashboard() {
         <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Avatar sx={{ width: 56, height: 56, bgcolor: 'success.main', fontSize: '1.5rem', fontWeight: 'bold', borderRadius: 2 }}>
-              {user?.name?.charAt(0) || 'R'}
+              {driverData?.name?.charAt(0) || user?.name?.charAt(0) || 'R'}
             </Avatar>
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" fontWeight="bold">{driverData?.name || user?.name || 'Repartidor'}</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <StarIcon sx={{ fontSize: 14, color: 'warning.main' }} />
-                <Typography variant="body2" color="warning.main">{driverData?.rating?.toFixed(1) || '5.0'}</Typography>
-                <Typography variant="body2" color="text.secondary">({driverData?.totalServices || 0} servicios)</Typography>
+                <Typography variant="body2" color="warning.main">
+                  {stats.avgRating.toFixed(1)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  ({stats.ratingCount > 0 ? stats.ratingCount : 'sin calificaciones'})
+                </Typography>
               </Box>
             </Box>
-            <Chip label={isOnline ? 'En línea' : 'Fuera de línea'} color={isOnline ? 'success' : 'default'} size="small" />
+            <Chip label={contextIsOnline ? 'En línea' : 'Fuera de línea'} color={contextIsOnline ? 'success' : 'default'} size="small" />
           </Box>
         </CardContent>
       </Card>
 
-      {!isOnline && (
+      {!contextIsOnline && (
         <Alert severity="info" sx={{ borderRadius: 2 }}>
           <Typography variant="subtitle2" fontWeight="bold">Bienvenido, {driverData?.name || user?.name || 'Repartidor'}</Typography>
-          <Typography variant="body2">Presiona el botón de abajo para ponerte en línea y comenzar a recibir servicios.</Typography>
+          <Typography variant="body2">Presiona el botón de abajo para ponerte en línea.</Typography>
         </Alert>
       )}
 
       <Button fullWidth size="large" variant="contained" onClick={handleToggleOnline} disabled={loading}
-        sx={{ py: 3, borderRadius: 2, bgcolor: isOnline ? 'success.main' : 'grey.700', fontSize: '1rem' }}
-        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <PowerIcon sx={{ animation: isOnline ? 'pulse 1s infinite' : 'none' }} />}>
-        {loading ? 'PROCESANDO...' : isOnline ? 'ESTÁS EN LÍNEA' : 'PONERSE EN LÍNEA'}
+        sx={{ py: 3, borderRadius: 2, bgcolor: contextIsOnline ? 'success.main' : 'grey.700', fontSize: '1rem' }}
+        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <PowerIcon sx={{ animation: contextIsOnline ? 'pulse 1s infinite' : 'none' }} />}>
+        {loading ? 'PROCESANDO...' : contextIsOnline ? 'ESTÁS EN LÍNEA' : 'PONERSE EN LÍNEA'}
       </Button>
 
       {/* GPS Status */}
-      {isOnline && (
+      {contextIsOnline && (
         <>
           {permissionStatus?.granted === false && (
             <Alert severity="error" sx={{ borderRadius: 2 }}>
               <Typography variant="subtitle2" fontWeight="bold">Permiso de ubicación denegado</Typography>
-              <Typography variant="body2">1. Haz clic en el candado en la barra de direcciones<br/>2. Permite el acceso a tu ubicación<br/>3. Recarga la página</Typography>
+              <Typography variant="body2">Habilita el acceso a ubicación en la configuración del navegador.</Typography>
             </Alert>
           )}
           
@@ -784,20 +761,26 @@ export default function RepartidorDashboard() {
                 </Stack>
                 <Stack direction="row" spacing={0.5}>
                   <Tooltip title="Obtener ubicación">
-                    <IconButton size="small" onClick={handleForceGetLocation} color="primary" disabled={gettingLocation}
-                      sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
-                      {gettingLocation ? <CircularProgress size={20} color="primary" /> : <MyLocationIcon fontSize="small" />}
-                    </IconButton>
+                    <span>
+                      <IconButton size="small" onClick={handleForceGetLocation} color="primary" disabled={gettingLocation}
+                        sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
+                        {gettingLocation ? <CircularProgress size={20} color="primary" /> : <MyLocationIcon fontSize="small" />}
+                      </IconButton>
+                    </span>
                   </Tooltip>
                   <Tooltip title="Ver detalles">
-                    <IconButton size="small" onClick={() => setShowGpsDetails(!showGpsDetails)}>
-                      {showGpsDetails ? <CollapseIcon fontSize="small" /> : <ExpandIcon fontSize="small" />}
-                    </IconButton>
+                    <span>
+                      <IconButton size="small" onClick={() => setShowGpsDetails(!showGpsDetails)}>
+                        {showGpsDetails ? <CollapseIcon fontSize="small" /> : <ExpandIcon fontSize="small" />}
+                      </IconButton>
+                    </span>
                   </Tooltip>
                   <Tooltip title="Ver mapa">
-                    <IconButton size="small" onClick={() => setShowMap(!showMap)} color="primary">
-                      <MapIcon fontSize="small" />
-                    </IconButton>
+                    <span>
+                      <IconButton size="small" onClick={() => setShowMap(!showMap)} color="primary">
+                        <MapIcon fontSize="small" />
+                      </IconButton>
+                    </span>
                   </Tooltip>
                 </Stack>
               </Stack>
@@ -815,7 +798,7 @@ export default function RepartidorDashboard() {
         </>
       )}
 
-      {showMap && isOnline && (
+      {showMap && contextIsOnline && (
         <Card sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 0 }}>
             <LiveMap driverLocation={currentLocation} height={isMobile ? 250 : 300} interactive={true} showRoute={false} showDriver={!!currentLocation} />
@@ -823,14 +806,14 @@ export default function RepartidorDashboard() {
         </Card>
       )}
 
-      {/* Stats */}
+      {/* Stats de la SEMANA */}
       <Grid container spacing={{ xs: 1, sm: 2 }}>
         <Grid item xs={4}>
           <Card sx={{ textAlign: 'center', borderRadius: 2, height: '100%' }}>
             <CardContent sx={{ py: 2 }}>
               <MoneyIcon sx={{ color: 'success.main', mb: 0.5 }} />
-              <Typography variant="h6" fontWeight="bold">{formatCurrency(stats?.totalEarnings || 0)}</Typography>
-              <Typography variant="caption" color="text.secondary">Total Ganado</Typography>
+              <Typography variant="h6" fontWeight="bold">{formatCurrency(stats.weekEarnings)}</Typography>
+              <Typography variant="caption" color="text.secondary">Esta Semana</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -838,8 +821,8 @@ export default function RepartidorDashboard() {
           <Card sx={{ textAlign: 'center', borderRadius: 2, height: '100%' }}>
             <CardContent sx={{ py: 2 }}>
               <BikeIcon sx={{ color: 'info.main', mb: 0.5 }} />
-              <Typography variant="h6" fontWeight="bold">{stats?.totalServices || 0}</Typography>
-              <Typography variant="caption" color="text.secondary">Servicios</Typography>
+              <Typography variant="h6" fontWeight="bold">{stats.weekServices}</Typography>
+              <Typography variant="caption" color="text.secondary">Servicios Semana</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -847,8 +830,10 @@ export default function RepartidorDashboard() {
           <Card sx={{ textAlign: 'center', borderRadius: 2, height: '100%' }}>
             <CardContent sx={{ py: 2 }}>
               <StarIcon sx={{ color: 'warning.main', mb: 0.5 }} />
-              <Typography variant="h6" fontWeight="bold">{driverData?.rating?.toFixed(1) || '5.0'}</Typography>
-              <Typography variant="caption" color="text.secondary">Rating</Typography>
+              <Typography variant="h6" fontWeight="bold">{stats.avgRating.toFixed(1)}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {stats.ratingCount > 0 ? `${stats.ratingCount} calif.` : 'Sin calif.'}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -934,20 +919,22 @@ export default function RepartidorDashboard() {
                 </Button>
               )}
               <Tooltip title="Abrir en Maps">
-                <IconButton onClick={() => {
-                  const address = encodeURIComponent(currentService.deliveryAddress + ', Maracay, Venezuela')
-                  window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank')
-                }} sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
-                  <LocationIcon color="primary" />
-                </IconButton>
+                <span>
+                  <IconButton onClick={() => {
+                    const address = encodeURIComponent(currentService.deliveryAddress + ', Maracay, Venezuela')
+                    window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank')
+                  }} sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
+                    <LocationIcon color="primary" />
+                  </IconButton>
+                </span>
               </Tooltip>
             </Stack>
           </CardContent>
         </Card>
       )}
 
-      {/* Servicios disponibles - Broadcast */}
-      {isOnline && !currentService && (
+      {/* Servicios disponibles */}
+      {contextIsOnline && !currentService && (
         <Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="subtitle1" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -973,11 +960,11 @@ export default function RepartidorDashboard() {
                 />
               ))}
             </Box>
-          ) : useBroadcast && isOnline && !currentService ? (
+          ) : useBroadcast && contextIsOnline && !currentService ? (
             <Card sx={{ p: 4, textAlign: 'center', bgcolor: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 2 }}>
               <BikeIcon sx={{ fontSize: 60, color: 'rgba(255,255,255,0.2)', mb: 2 }} />
               <Typography variant="h6" color="text.secondary" gutterBottom>Sin servicios cercanos</Typography>
-              <Typography variant="body2" color="text.disabled">Te notificaremos cuando haya un nuevo pedido en tu zona (radio 3-8km)</Typography>
+              <Typography variant="body2" color="text.disabled">Te notificaremos cuando haya un nuevo pedido en tu zona</Typography>
             </Card>
           ) : null}
         </Box>
@@ -985,37 +972,46 @@ export default function RepartidorDashboard() {
 
       {/* Ganancias de Hoy */}
       <Card sx={{ borderRadius: 2 }}>
-        <CardHeader avatar={<MoneyIcon color="success" />} title={<Typography variant="subtitle1" fontWeight="bold" color="success.main">Ganancias de Hoy</Typography>} action={<IconButton onClick={loadStats} size="small"><RefreshIcon /></IconButton>} />
+        <CardHeader avatar={<MoneyIcon color="success" />} title={<Typography variant="subtitle1" fontWeight="bold" color="success.main">Ganancias de Hoy</Typography>} />
         <CardContent>
-          <Typography variant="h4" fontWeight="bold" color="success.main">{formatCurrency(stats?.earningsToday || 0)}</Typography>
-          <Stack direction="row" justifyContent="space-between" sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-            <Box><Typography variant="caption" color="text.secondary">Servicios hoy</Typography><Typography variant="body2" fontWeight="bold">{stats?.completedToday || 0}</Typography></Box>
-            <Box><Typography variant="caption" color="text.secondary">Esta semana</Typography><Typography variant="body2" fontWeight="bold">{formatCurrency(stats?.weeklyEarnings || 0)}</Typography></Box>
-          </Stack>
+          <Grid container spacing={2}>
+            <Grid item xs={6}>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="h5" fontWeight="bold" color="success.main">{formatCurrency(stats.todayEarnings)}</Typography>
+                <Typography variant="caption" color="text.secondary">Total del día</Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={6}>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="h5" fontWeight="bold">{stats.todayServices}</Typography>
+                <Typography variant="caption" color="text.secondary">Servicios</Typography>
+              </Box>
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
 
-      {/* Historial de servicios */}
+      {/* Historial Reciente */}
       <Card sx={{ borderRadius: 2 }}>
-        <CardHeader avatar={<BikeIcon color="primary" />} title={<Typography variant="subtitle1" fontWeight="bold">Historial Reciente</Typography>} action={<IconButton onClick={loadStats} size="small"><RefreshIcon /></IconButton>} />
+        <CardHeader avatar={<ClockIcon color="primary" />} title={<Typography variant="subtitle1" fontWeight="bold">Historial Reciente</Typography>} />
         <CardContent sx={{ pt: 0 }}>
-          {myServices.length === 0 ? (
-            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
+          {myServices.filter(s => s.status === 'entregado').slice(0, 5).length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
               <BikeIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">No hay servicios en tu historial</Typography>
-            </Paper>
+              <Typography variant="body2" color="text.secondary">No hay servicios completados</Typography>
+            </Box>
           ) : (
             <Stack spacing={1}>
-              {myServices.slice(0, 10).map((service) => {
+              {myServices.filter(s => s.status === 'entregado').slice(0, 5).map((service) => {
                 const status = getStatusConfig(service.status)
                 return (
                   <Paper key={service.id} variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
                     <Grid container spacing={1} alignItems="center">
-                      <Grid item xs={4}>
-                        <Typography variant="subtitle2" fontWeight="bold">ID: {service.serviceId}</Typography>
-                        <Typography variant="caption" color="text.secondary">{formatDate(service.createdAt)}</Typography>
+                      <Grid item xs={3}>
+                        <Typography variant="body2" fontWeight="bold">{service.serviceId}</Typography>
+                        <Typography variant="caption" color="text.secondary">{formatDate(service.completedAt || service.createdAt)}</Typography>
                       </Grid>
-                      <Grid item xs={4}>
+                      <Grid item xs={5}>
                         <Typography variant="body2" noWrap>{service.zoneName}</Typography>
                       </Grid>
                       <Grid item xs={2}>
@@ -1033,37 +1029,8 @@ export default function RepartidorDashboard() {
         </CardContent>
       </Card>
 
-      {/* Footer */}
-      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-          <Box
-            component="img"
-            src="/logo-192.png"
-            alt="ON Delivery"
-            sx={{ width: 28, height: 28, borderRadius: 1 }}
-          />
-          <Typography
-            variant="subtitle2"
-            fontWeight="bold"
-            sx={{
-              background: RIDERY_COLORS.gradientPrimary,
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent'
-            }}
-          >
-            ON Delivery
-          </Typography>
-        </Box>
-        <Typography variant="caption" color="text.secondary" display="block">
-          © {currentYear} Copyright. Desarrollado por Erick Simosa
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          ericksimosa@gmail.com - 0424 3036024
-        </Typography>
-      </Box>
+      <VersionFooter />
 
-      {/* Confirm Dialog */}
       <Dialog open={confirmDialog.open} onClose={() => setConfirmDialog({ open: false, type: '', service: null })}>
         <DialogTitle>Confirmar acción</DialogTitle>
         <DialogContent>
@@ -1079,7 +1046,6 @@ export default function RepartidorDashboard() {
         </DialogActions>
       </Dialog>
 
-      {/* Chat Modal */}
       {currentService && (
         <Dialog open={!!currentService && !confirmDialog.open} onClose={() => {}} maxWidth="sm" fullWidth fullScreen={isMobile}>
           <DialogTitle>

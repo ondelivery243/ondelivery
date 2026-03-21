@@ -90,7 +90,7 @@ export const handler = async (event, context) => {
   const shouldUpdateNow = currentMinute % UPDATE_INTERVAL === 0;
 
   if (isInUpdateWindow && shouldUpdateNow) {
-    console.log(`📊 ${currentHour}:${currentMinute} - Actualizando tasa del dolar...`);
+    console.log(`📊 ${currentHour}:${currentMinute} - Verificando tasa del dolar...`);
     
     try {
       const controller = new AbortController();
@@ -112,7 +112,28 @@ export const handler = async (event, context) => {
       const docSnap = await db.collection('settings').doc('app_config').get();
       const previousRate = docSnap.exists ? (docSnap.data().exchangeRate || 0) : 0;
 
-      // Guardar en Firestore
+      // ✅ CAMBIO: Comparar tasas con 2 decimales
+      const previousFormatted = parseFloat(previousRate).toFixed(2);
+      const newFormatted = parseFloat(rate).toFixed(2);
+
+      // ✅ SOLO ESCRIBIR EN FIREBASE SI LA TASA CAMBIÓ
+      if (previousFormatted === newFormatted) {
+        console.log(`💤 Tasa sin cambios: ${rate} Bs/$ (no se escribe en Firebase)`);
+        return { 
+          statusCode: 200, 
+          headers: securityHeaders,
+          body: JSON.stringify({ 
+            success: true, 
+            updated: false,
+            rate: parseFloat(rate),
+            previousRate: parseFloat(previousRate),
+            time: `${currentHour}:${String(currentMinute).padStart(2, '0')}`,
+            message: `Tasa sin cambios: ${rate} Bs/$`
+          }) 
+        };
+      }
+
+      // ✅ LA TASA CAMBIÓ - Escribir en Firestore
       await db.collection('settings').doc('app_config').set({
         exchangeRate: Number(rate),
         lastUpdate: admin.firestore.FieldValue.serverTimestamp(),
@@ -120,16 +141,17 @@ export const handler = async (event, context) => {
         source: 'api-alcambio.onrender.com'
       }, { merge: true });
 
-      console.log(`✅ Tasa actualizada: ${rate} Bs/$ (anterior: ${previousRate})`);
+      console.log(`✅ Tasa ACTUALIZADA: ${rate} Bs/$ (anterior: ${previousRate})`);
       
       return { 
         statusCode: 200, 
         headers: securityHeaders,
         body: JSON.stringify({ 
           success: true, 
-          rate: rate, 
-          previousRate: previousRate,
-          time: `${currentHour}:${currentMinute}`,
+          updated: true,
+          rate: parseFloat(rate),
+          previousRate: parseFloat(previousRate),
+          time: `${currentHour}:${String(currentMinute).padStart(2, '0')}`,
           message: `Tasa actualizada: ${rate} Bs/$`
         }) 
       };

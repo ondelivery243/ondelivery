@@ -1,0 +1,200 @@
+================================================================================
+                    📦 FLUJO DE DESPLIEGUE - ON Delivery PWA
+================================================================================
+
+Este documento describe el proceso completo para desplegar una nueva versión
+de la aplicación ON Delivery.
+
+================================================================================
+📋 ARCHIVOS NUEVOS CREADOS
+================================================================================
+
+1. src/config/version.js          → Configuración centralizada de versión
+2. src/components/common/UpdatePWA.jsx  → Banner de actualización para usuarios
+3. src/components/common/VersionFooter.jsx → Footer con versión en dashboards
+4. scripts/release.js             → Script de automatización de versiones
+
+================================================================================
+📋 ARCHIVOS MODIFICADOS
+================================================================================
+
+1. vite.config.js                 → registerType: 'prompt' (control manual)
+2. src/App.jsx                    → Agrega componente <UpdatePWA />
+3. package.json                   → Scripts npm + versión
+4. public/manifest.json           → Campo version
+5. src/pages/admin/Dashboard.jsx  → Agrega <VersionFooter />
+6. src/pages/restaurante/Dashboard.jsx → Agrega <VersionFooter />
+7. src/pages/repartidor/Dashboard.jsx → Agrega <VersionFooter />
+
+================================================================================
+🚀 COMANDOS DISPONIBLES
+================================================================================
+
+npm run release 1.2.0        → Establece versión específica
+npm run release patch         → Incrementa Z (1.0.0 → 1.0.1) - Bug fixes
+npm run release minor         → Incrementa Y (1.0.0 → 1.1.0) - Nuevas funciones
+npm run release major         → Incrementa X (1.0.0 → 2.0.0) - Cambios grandes
+npm run release 1.2.0 --notes → Versión con notas interactivas
+npm run release --help        → Muestra ayuda
+
+================================================================================
+📝 FLUJO COMPLETO DE DESPLIEGUE
+================================================================================
+
+ESCENARIO 1: Bug fix pequeño (patch)
+-------------------------------------
+Paso 1: Hacer los cambios en el código
+
+Paso 2: Ejecutar el script de release
+    npm run release patch
+
+Paso 3: Revisar los cambios (opcional)
+    git diff
+
+Paso 4: Confirmar y desplegar
+    git add .
+    git commit -m "v1.1.1 - Fix bug en liquidaciones"
+    git push
+
+Paso 5: Verificar en producción
+    - La PWA se compilará automáticamente (Netlify/Vercel)
+    - Los usuarios verán un banner de "Nueva versión disponible"
+    - Al aceptar, se actualizará la app
+
+
+ESCENARIO 2: Nueva función (minor)
+----------------------------------
+Paso 1: Desarrollar la nueva función
+
+Paso 2: Probar localmente
+    npm run dev
+
+Paso 3: Crear release con notas interactivas
+    npm run release minor --notes
+
+Paso 4: El script pedirá las notas (escribir una por línea):
+    Nota 1: Nueva función de chat en tiempo real
+    Nota 2: Mejoras en notificaciones push
+    Nota 3: [Enter para terminar]
+
+Paso 5: Confirmar y desplegar
+    git add .
+    git commit -m "v1.2.0 - Chat en tiempo real"
+    git push
+
+
+ESCENARIO 3: Release planificado (versión específica)
+------------------------------------------------------
+Paso 1: Preparar todos los cambios
+
+Paso 2: Crear release con versión específica
+    npm run release 2.0.0 --notes
+
+Paso 3: Escribir las notas del release
+
+Paso 4: Confirmar y desplegar
+    git add .
+    git commit -m "v2.0.0 - Rediseño completo de la app"
+    git push
+
+================================================================================
+📊 QUÉ HACE EL SCRIPT AUTOMÁTICAMENTE
+================================================================================
+
+✅ Actualiza src/config/version.js (versión + fecha + notas)
+✅ Actualiza package.json (campo version)
+✅ Actualiza public/manifest.json (campo version)
+✅ Muestra resumen con próximos pasos
+
+================================================================================
+🔄 CÓMO FUNCIONA LA ACTUALIZACIÓN PARA EL USUARIO
+================================================================================
+
+1. Usuario tiene la PWA instalada en su dispositivo
+
+2. Desarrollador hace git push con nueva versión
+
+3. El servicio de hosting (Netlify/Vercel) compila y despliega
+
+4. Usuario abre o refresca la app
+
+5. Service Worker detecta nueva versión disponible
+
+6. Aparece banner: "Nueva versión disponible v1.2.0"
+
+7. Usuario hace clic en "Actualizar ahora"
+
+8. La app se recarga con la nueva versión
+
+================================================================================
+📱 DÓNDE VEN LA VERSIÓN LOS USUARIOS
+================================================================================
+
+- Dashboard Admin       → Footer inferior
+- Dashboard Restaurante → Footer inferior  
+- Dashboard Repartidor  → Footer inferior
+- Banner de actualización → Cuando hay update disponible
+
+Cada footer muestra:
+- Logo ON Delivery
+- Versión actual (ej: v1.1.0)
+- Botón para buscar actualizaciones manualmente
+- Copyright y datos de contacto
+
+================================================================================
+⚠️ IMPORTANTE
+================================================================================
+
+• SIEMPRE usa el script npm run release antes de desplegar
+• NUNCA modifiques la versión manualmente en los 3 archivos
+• El script mantiene todo sincronizado automáticamente
+• La fecha se actualiza automáticamente al día actual
+
+================================================================================
+📌 EJEMPLO COMPLETO
+================================================================================
+
+# Escenario: Arreglaste un bug y quieres desplegar
+
+ $ npm run release patch
+
+🔄 Actualizando versión: 1.1.0 → 1.1.1
+
+==================================================
+   🚀 RELEASE CREADO EXITOSAMENTE
+==================================================
+
+   Versión: 1.1.1
+   Fecha: 2026-03-21
+
+   📋 Notas del release:
+      1. Mejoras y correcciones de errores
+      2. Actualización de seguridad
+      3. Optimización de rendimiento
+
+   📁 Archivos actualizados:
+      ✓ src/config/version.js
+      ✓ package.json
+      ✓ public/manifest.json
+
+   📤 Próximos pasos:
+      1. Revisa los cambios: git diff
+      2. Confirma: git add . && git commit -m "v1.1.1 - Fix liquidaciones"
+      3. Despliega: git push
+      4. El PWA se actualizará automáticamente
+
+ $ git add .
+ $ git commit -m "v1.1.1 - Fix error en cálculo de liquidaciones"
+ $ git push
+
+# ¡Listo! La actualización está en producción.
+
+================================================================================
+📞 SOPORTE
+================================================================================
+
+Desarrollador: Erick Simosa
+Email: ericksimosa@gmail.com
+Teléfono: 0424 3036024
+
+================================================================================

@@ -13,7 +13,7 @@ import {
   CheckCircle as CheckIcon, AccessTime as ClockIcon, Cancel as CancelIcon,
   ExpandMore as ExpandIcon, ExpandLess as CollapseIcon, Refresh as RefreshIcon,
   AttachMoney as MoneyIcon, Chat as ChatIcon, Star as StarIcon, Map as MapIcon,
-  List as ListIcon, Notifications as NotificationIcon
+  List as ListIcon, Notifications as NotificationIcon, CalendarToday as CalendarIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { formatCurrency, formatTime, formatDate, useRestaurantStore, useStore } from '../../store/useStore'
@@ -26,11 +26,56 @@ import { ChatButton } from '../../components/chat'
 import { RatingModal } from '../../components/rating'
 import { ServiceTracker } from '../../components/tracking'
 import { subscribeToChatRoom } from '../../services/chatService'
-import { RIDERY_COLORS } from '../../theme/theme'
+import VersionFooter from '../../components/common/VersionFooter'
 
 function TabPanel({ value, index, children }) {
   return value === index ? <Box sx={{ pt: 2 }}>{children}</Box> : null
 }
+
+// ==================== FUNCIONES DE MANEJO SEMANAL ====================
+const getMonday = (date) => {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  const monday = new Date(d.setDate(diff))
+  monday.setHours(0, 0, 0, 0)
+  return monday
+}
+
+const getSunday = (date) => {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? 0 : 7)
+  const sunday = new Date(d.setDate(diff))
+  sunday.setHours(23, 59, 59, 999)
+  return sunday
+}
+
+const formatWeekRange = () => {
+  const monday = getMonday(new Date())
+  const sunday = getSunday(new Date())
+  const options = { day: 'numeric', month: 'short' }
+  return `${monday.toLocaleDateString('es-EC', options)} - ${sunday.toLocaleDateString('es-EC', options)}`
+}
+
+const getCurrentWeekMonday = () => {
+  const today = new Date()
+  const day = today.getDay()
+  const diff = today.getDate() - day + (day === 0 ? -6 : 1)
+  const monday = new Date(today.setDate(diff))
+  monday.setHours(0, 0, 0, 0)
+  return monday
+}
+
+const isInCurrentWeek = (date) => {
+  if (!date) return false
+  const monday = getCurrentWeekMonday()
+  const sunday = new Date(monday)
+  sunday.setDate(sunday.getDate() + 6)
+  sunday.setHours(23, 59, 59, 999)
+  return date >= monday && date <= sunday
+}
+// ====================================================================
 
 let audioContextInstance = null
 
@@ -222,41 +267,39 @@ export default function RestauranteDashboard() {
 
   const totalUnread = Object.values(chatUnreadCounts).reduce((sum, count) => sum + count, 0)
 
-  // ✅ CALCULAR ESTADÍSTICAS EN TIEM REAL (igual que Liquidaciones)
-  const getTodayServices = () => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+  // ==================== ESTADÍSTICAS SEMANALES ====================
+  const getWeekServices = () => {
     return services.filter(s => {
       const createdAt = s.createdAt?.toDate?.()
-      return createdAt && createdAt >= today
+      return createdAt && isInCurrentWeek(createdAt)
     }).length
   }
 
-  // ✅ Servicios entregados del mes actual
-  const getMonthlyTotal = () => {
-    const now = new Date()
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    firstDayOfMonth.setHours(0, 0, 0, 0)
-    
+  const getWeekTotal = () => {
     return services
       .filter(s => {
         const createdAt = s.createdAt?.toDate?.()
-        return s.status === 'entregado' && createdAt && createdAt >= firstDayOfMonth
+        return s.status === 'entregado' && createdAt && isInCurrentWeek(createdAt)
       })
       .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
   }
 
-  // ✅ Por pagar: servicios entregados NO liquidados (usa settledRestaurant)
+  const getTotalHistorico = () => {
+    return services
+      .filter(s => s.status === 'entregado')
+      .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+  }
+
   const getPendingPayment = () => {
     return services
       .filter(s => {
         if (s.status !== 'entregado') return false
-        // Usar settledRestaurant si existe, si no usar settled (compatibilidad)
         const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
         return !settledField
       })
       .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
   }
+  // ==============================================================
 
   // Detectar servicios para calificar
   useEffect(() => {
@@ -436,9 +479,10 @@ export default function RestauranteDashboard() {
     }
   }
 
-  // ✅ Valores calculados en tiempo real
-  const servicesToday = getTodayServices()
-  const monthlyTotal = getMonthlyTotal()
+  // Valores calculados en tiempo real
+  const servicesWeek = getWeekServices()
+  const weekTotal = getWeekTotal()
+  const totalHistorico = getTotalHistorico()
   const pendingPayment = getPendingPayment()
 
   return (
@@ -488,25 +532,47 @@ export default function RestauranteDashboard() {
             </Button>
           </Stack>
 
-          {/* Stats Cards - ✅ Valores calculados en tiempo real */}
+          {/* Tarjeta Semana Actual */}
+          <Card sx={{ borderRadius: 2, background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`, color: 'white' }}>
+            <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                <CalendarIcon />
+                <Typography variant="subtitle1" fontWeight="bold">Semana Actual</Typography>
+              </Stack>
+              <Typography variant="h6" fontWeight="medium">{formatWeekRange()}</Typography>
+              <Typography variant="body2" sx={{ opacity: 0.8, mt: 0.5 }}>
+                Los totales se reinician cada lunes
+              </Typography>
+            </CardContent>
+          </Card>
+
+          {/* Stats Cards - Estadísticas Semanales */}
           <Grid container spacing={{ xs: 1.5, sm: 3 }}>
-            <Grid item xs={4}>
+            <Grid item xs={6} sm={3}>
               <Card sx={{ bgcolor: 'primary.main', color: 'white', height: '100%' }}>
                 <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
-                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Servicios Hoy</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{servicesToday}</Typography>
+                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Servicios Esta Semana</Typography>
+                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{servicesWeek}</Typography>
                 </CardContent>
               </Card>
             </Grid>
-            <Grid item xs={4}>
+            <Grid item xs={6} sm={3}>
               <Card sx={{ bgcolor: 'success.main', color: 'white', height: '100%' }}>
                 <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
-                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Total Pagado (Mes)</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(monthlyTotal)}</Typography>
+                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Total Esta Semana</Typography>
+                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(weekTotal)}</Typography>
                 </CardContent>
               </Card>
             </Grid>
-            <Grid item xs={4}>
+            <Grid item xs={6} sm={3}>
+              <Card sx={{ bgcolor: 'info.main', color: 'white', height: '100%' }}>
+                <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
+                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Total Histórico</Typography>
+                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(totalHistorico)}</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={6} sm={3}>
               <Card sx={{ bgcolor: 'warning.main', color: 'white', height: '100%' }}>
                 <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
                   <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Por Pagar</Typography>
@@ -799,30 +865,17 @@ export default function RestauranteDashboard() {
                   <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Monto a Cobrar</Typography>
                   <TextField fullWidth type="number" placeholder="Si es en efectivo" value={nuevoServicio.montoCobrar}
                     onChange={(e) => setNuevoServicio({ ...nuevoServicio, montoCobrar: e.target.value })}
-                    disabled={nuevoServicio.metodoPago === 'pagado'}
                     InputProps={{ startAdornment: <InputAdornment position="start"><MoneyIcon color="action" /></InputAdornment> }} />
                 </Grid>
                 
                 <Grid item xs={12}>
-                  <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Notas Adicionales</Typography>
-                  <TextField fullWidth placeholder="Instrucciones especiales para la entrega" value={nuevoServicio.notas}
+                  <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Notas adicionales</Typography>
+                  <TextField fullWidth placeholder="Instrucciones especiales, referencia, etc." value={nuevoServicio.notas}
                     onChange={(e) => setNuevoServicio({ ...nuevoServicio, notas: e.target.value })} multiline rows={2} />
                 </Grid>
               </Grid>
-
-              {nuevoServicio.zona && (
-                <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 2, textAlign: 'center' }}>
-                  <Typography variant="body2" color="warning.dark">Costo del servicio:</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold" color="warning.dark">
-                    {formatCurrency(zones.find(z => z.id === nuevoServicio.zona)?.price || 0)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Este monto será agregado a tu próxima liquidación
-                  </Typography>
-                </Box>
-              )}
             </DialogContent>
-            <DialogActions sx={{ p: { xs: 1.5, sm: 2 }, gap: 1 }}>
+            <DialogActions sx={{ p: 2 }}>
               <Button onClick={() => setOpenDialog(false)} fullWidth={isMobile}>Cancelar</Button>
               <Button variant="contained" onClick={handleCrearServicio} fullWidth={isMobile} disabled={saving}>
                 {saving ? 'Creando...' : 'Crear Servicio'}
@@ -848,35 +901,8 @@ export default function RestauranteDashboard() {
         </>
       )}
 
-      {/* Footer */}
-      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-          <Box
-            component="img"
-            src="/logo-192.png"
-            alt="ON Delivery"
-            sx={{ width: 28, height: 28, borderRadius: 1 }}
-          />
-          <Typography
-            variant="subtitle2"
-            fontWeight="bold"
-            sx={{
-              background: RIDERY_COLORS.gradientPrimary,
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent'
-            }}
-          >
-            ON Delivery
-          </Typography>
-        </Box>
-        <Typography variant="caption" color="text.secondary" display="block">
-          © {currentYear} Copyright. Desarrollado por Erick Simosa
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          ericksimosa@gmail.com - 0424 3036024
-        </Typography>
-      </Box>
+      {/* Footer con versión */}
+      <VersionFooter />
     </Box>
   )
 }

@@ -34,7 +34,8 @@ import {
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { useStore, useThemeStore, useDriverStore } from '../../store/useStore'
-import { getDriverByUserId, setDriverOnline } from '../../services/firestore'
+import { getDriverByUserId } from '../../services/firestore'
+import { useDriverTracking } from '../../contexts/DriverTrackingContext'
 
 export default function RepartidorLayout() {
   const navigate = useNavigate()
@@ -44,11 +45,23 @@ export default function RepartidorLayout() {
   const { enqueueSnackbar } = useSnackbar()
   const { user, logout } = useStore()
   const { mode, toggleTheme } = useThemeStore()
-  const { isOnline, setIsOnline } = useDriverStore()
+  const { setIsOnline } = useDriverStore()
 
   const [driverData, setDriverData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [navValue, setNavValue] = useState(0)
+
+  // Hook de tracking GPS (desde contexto global)
+  const {
+    isOnline: contextIsOnline,
+    goOnline,
+    goOffline
+  } = useDriverTracking()
+
+  // Sincronizar estado del contexto con el store local
+  useEffect(() => {
+    setIsOnline(contextIsOnline)
+  }, [contextIsOnline, setIsOnline])
 
   // Cargar datos del repartidor
   useEffect(() => {
@@ -56,13 +69,10 @@ export default function RepartidorLayout() {
       if (user?.uid) {
         const driver = await getDriverByUserId(user.uid)
         setDriverData(driver)
-        if (driver) {
-          setIsOnline(driver.isOnline || false)
-        }
       }
     }
     loadDriverData()
-  }, [user, setIsOnline])
+  }, [user])
 
   // Determinar tab activo
   useEffect(() => {
@@ -72,6 +82,7 @@ export default function RepartidorLayout() {
     else setNavValue(0)
   }, [location.pathname])
 
+  // Toggle online/offline - USA EL CONTEXTO
   const handleToggleOnline = async () => {
     if (!driverData?.id) {
       enqueueSnackbar('Error: No se encontró tu perfil de repartidor', { variant: 'error' })
@@ -79,17 +90,24 @@ export default function RepartidorLayout() {
     }
     
     setLoading(true)
-    const result = await setDriverOnline(driverData.id, !isOnline)
-    setLoading(false)
     
-    if (result.success) {
-      setIsOnline(!isOnline)
-      enqueueSnackbar(
-        isOnline ? 'Saliste del sistema' : '¡Ahora estás en línea!', 
-        { variant: isOnline ? 'info' : 'success' }
-      )
-    } else {
+    try {
+      if (!contextIsOnline) {
+        const success = await goOnline()
+        if (success) {
+          enqueueSnackbar('¡Ahora estás en línea!', { variant: 'success' })
+        }
+      } else {
+        const success = await goOffline()
+        if (success) {
+          enqueueSnackbar('Saliste del sistema', { variant: 'info' })
+        }
+      }
+    } catch (error) {
+      console.error('Error:', error)
       enqueueSnackbar('Error al cambiar estado', { variant: 'error' })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -154,16 +172,16 @@ Control. Historial. Liquidaciones. Todo en un solo lugar.
             <Typography variant="subtitle2" fontWeight="bold" color="text.primary">
               ON Delivery
             </Typography>
-            <Typography variant="caption" sx={{ color: isOnline ? 'success.main' : 'text.secondary' }}>
-              {isOnline ? '🟢 En línea' : '🔴 Fuera de línea'}
+            <Typography variant="caption" sx={{ color: contextIsOnline ? 'success.main' : 'text.secondary' }}>
+              {contextIsOnline ? '🟢 En línea' : '🔴 Fuera de línea'}
             </Typography>
           </Box>
           
           {/* Quick Online Toggle */}
           <Button
             size="small"
-            variant={isOnline ? 'contained' : 'outlined'}
-            color={isOnline ? 'success' : 'primary'}
+            variant={contextIsOnline ? 'contained' : 'outlined'}
+            color={contextIsOnline ? 'success' : 'primary'}
             onClick={handleToggleOnline}
             disabled={loading}
             startIcon={<PowerIcon sx={{ fontSize: 16 }} />}
@@ -174,7 +192,7 @@ Control. Historial. Liquidaciones. Todo en un solo lugar.
               px: 1.5
             }}
           >
-            {isOnline ? 'Online' : 'Offline'}
+            {contextIsOnline ? 'Online' : 'Offline'}
           </Button>
           
           <IconButton onClick={toggleTheme} sx={{ color: 'text.primary' }} size="small">

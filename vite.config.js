@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt', // Cambiado para permitir control de actualizaciones por el usuario
       includeAssets: ['favicon.ico', 'logo.png', 'logo-192.png', 'logo-512.png'],
       manifest: {
         name: 'ON Delivery - Maracay',
