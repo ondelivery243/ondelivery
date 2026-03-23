@@ -77,21 +77,46 @@ const isInCurrentWeek = (date) => {
 }
 // ====================================================================
 
-let audioContextInstance = null
-
-const initAudioContext = () => {
-  if (!audioContextInstance || audioContextInstance.state === 'closed') {
-    audioContextInstance = new (window.AudioContext || window.webkitAudioContext)()
+// ============================================
+// 🔊 SISTEMA DE SONIDOS - PERSISTENTE EN WINDOW (FIXED)
+// ============================================
+const getAudioInstance = () => {
+  if (typeof window !== 'undefined') {
+    return window.__RESTAURANT_AUDIO_CONTEXT || null
   }
-  if (audioContextInstance.state === 'suspended') {
-    audioContextInstance.resume()
-  }
-  return audioContextInstance
+  return null
 }
 
-const playChatMessageSound = () => {
+const setAudioInstance = (ctx) => {
+  if (typeof window !== 'undefined') {
+    window.__RESTAURANT_AUDIO_CONTEXT = ctx
+  }
+}
+
+const initAudioContext = async () => {
   try {
-    const ctx = initAudioContext()
+    let ctx = getAudioInstance()
+    if (ctx && ctx.state === 'closed') {
+      ctx = null
+      setAudioInstance(null)
+    }
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)()
+      setAudioInstance(ctx)
+    }
+    if (ctx.state === 'suspended') await ctx.resume()
+    return getAudioInstance()
+  } catch (e) {
+    console.error('❌ [Audio] Error:', e)
+    return null
+  }
+}
+
+const playChatMessageSound = async () => {
+  try {
+    const ctx = await initAudioContext()
+    if(!ctx || ctx.state !== 'running') return
+
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
@@ -106,13 +131,14 @@ const playChatMessageSound = () => {
     gain.connect(ctx.destination)
     osc.start(now)
     osc.stop(now + 0.25)
+    console.log('✅ [Sonido] Sonido CHAT ejecutado en hardware');
   } catch (e) {
     console.log('❌ Error sonido chat:', e.message)
   }
 }
 
-const initAudioOnFirstInteraction = () => {
-  initAudioContext()
+const initAudioOnFirstInteraction = async () => {
+  await initAudioContext();
   document.removeEventListener('click', initAudioOnFirstInteraction)
   document.removeEventListener('touchstart', initAudioOnFirstInteraction)
   document.removeEventListener('keydown', initAudioOnFirstInteraction)
@@ -123,6 +149,8 @@ if (typeof document !== 'undefined') {
   document.addEventListener('touchstart', initAudioOnFirstInteraction, { once: true })
   document.addEventListener('keydown', initAudioOnFirstInteraction, { once: true })
 }
+// ====================================================================
+
 
 export default function RestauranteDashboard() {
   const { enqueueSnackbar } = useSnackbar()
@@ -145,9 +173,13 @@ export default function RestauranteDashboard() {
   const [showChatAlert, setShowChatAlert] = useState(false)
   const [lastChatMessage, setLastChatMessage] = useState(null)
   
+  // ✅ Estado para forzar el pulso visual
+  const [forceShowPulse, setForceShowPulse] = useState(false)
+  
   const chatUnsubscribers = useRef([])
   const chatOpenRef = useRef(false)
   const prevUnreadRef = useRef({})
+  const lastMessageTimesRef = useRef({})
   const servicesTrackedRef = useRef(new Set())
   const currentYear = new Date().getFullYear()
   
@@ -209,7 +241,7 @@ export default function RestauranteDashboard() {
     loadData()
   }, [restaurantData, setRestaurantData, user])
 
-  // Suscripción a chat
+  // ✅ SUSCRIPCIÓN A CHAT - FIX: SONIDO EN AMBOS ESTADOS Y SINCRONIZACIÓN DE ALERTA
   useEffect(() => {
     chatUnsubscribers.current.forEach(unsub => unsub())
     chatUnsubscribers.current = []
@@ -225,34 +257,68 @@ export default function RestauranteDashboard() {
       const unsubscribe = subscribeToChatRoom(serviceId, (room) => {
         if (room) {
           const unreadCount = room.unreadByRestaurant || 0
-          const prevCount = prevUnreadRef.current[serviceId] ?? 0
-          const isAlreadyInitialized = wasAlreadyTracked || serviceId in prevUnreadRef.current
-          const isNewMessage = isAlreadyInitialized && unreadCount > prevCount && !chatOpenRef.current
+          const lastMessageTime = room.lastMessageAt || 0
+          const lastSender = room.lastMessageBy
           
-          if (isNewMessage) {
+          // 1. Actualizar contadores
+          setChatUnreadCounts(prev => ({ ...prev, [serviceId]: unreadCount }))
+          
+          // 2. Detectar NUEVO mensaje (por timestamp)
+          const prevTime = lastMessageTimesRef.current[serviceId] || 0
+          const isNewMessage = lastMessageTime > prevTime
+          const isFromOther = lastSender !== 'restaurant'
+          
+          // Actualizar timestamp
+          lastMessageTimesRef.current[serviceId] = lastMessageTime
+          
+          // 3. Lógica de Alerta
+          if (isNewMessage && isFromOther && wasAlreadyTracked) {
+            // A. SONIDO: REPRODUCIR SIEMPRE (abierto o cerrado)
+            console.log(`🔔 [Restaurante] Nuevo mensaje. Chat Abierto: ${chatOpenRef.current}`);
             playChatMessageSound()
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200])
             
-            setLastChatMessage({
-              serviceName: service.driverName || service.zoneName,
-              message: room.lastMessage,
-              serviceId: serviceId
-            })
-            setShowChatAlert(true)
-            
-            if (Notification.permission === 'granted') {
-              try {
-                new Notification('💬 Nuevo mensaje', {
-                  body: `${service.driverName || 'Repartidor'}: ${room.lastMessage?.substring(0, 50)}...`,
-                  icon: '/logo-192.png'
-                })
-              } catch (e) {}
+            // B. ALERTAS VISUALES: Solo si el chat está CERRADO
+            if (!chatOpenRef.current) {
+              console.log('🔴 [Restaurante] Chat cerrado -> Activando pulso visual');
+              // Pulso del FAB
+              setForceShowPulse(true)
+              
+              // Vibración
+              if (navigator.vibrate) navigator.vibrate([200, 100, 200])
+              
+              // Alerta flotante
+              setLastChatMessage({
+                serviceName: service.driverName || service.zoneName,
+                message: room.lastMessage,
+                serviceId: serviceId
+              })
+              setShowChatAlert(true)
+              
+              // Notificación Nativa
+              if (Notification.permission === 'granted') {
+                try {
+                  new Notification('💬 Nuevo mensaje', {
+                    body: `${service.driverName || 'Repartidor'}: ${room.lastMessage?.substring(0, 50)}...`,
+                    icon: '/logo-192.png'
+                  })
+                } catch (e) {}
+              }
+            } else {
+               console.log('👁️ [Restaurante] Chat abierto -> Solo sonido, sin alertas visuales');
             }
           }
           
+          // 4. ✅ SINCRONIZAR LECTURA: Si el contador baja a 0, quitar alerta visual
+          if (unreadCount === 0) {
+            console.log('👀 [Restaurante] Mensaje leído (contador 0) -> Quitando pulso visual');
+            setForceShowPulse(false)
+          }
+          
+          // Marcar como rastreado
+          if (!wasAlreadyTracked) {
+             servicesTrackedRef.current.add(serviceId)
+          }
           prevUnreadRef.current[serviceId] = unreadCount
-          servicesTrackedRef.current.add(serviceId)
-          setChatUnreadCounts(prev => ({ ...prev, [serviceId]: unreadCount }))
         }
       })
       
@@ -476,6 +542,7 @@ export default function RestauranteDashboard() {
     if (service) {
       setChatService(service)
       setShowChatAlert(false)
+      setForceShowPulse(false)
     }
   }
 
@@ -546,7 +613,7 @@ export default function RestauranteDashboard() {
             </CardContent>
           </Card>
 
-          {/* Stats Cards - Estadísticas Semanales */}
+          {/* Stats Cards */}
           <Grid container spacing={{ xs: 1.5, sm: 3 }}>
             <Grid item xs={6} sm={3}>
               <Card sx={{ bgcolor: 'primary.main', color: 'white', height: '100%' }}>
@@ -588,8 +655,8 @@ export default function RestauranteDashboard() {
               <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
                   <DeliveryIcon color="primary" />
+                  {/* ✅ REMOVED: Chip de mensajes aquí */}
                   <Typography variant="subtitle1" fontWeight="bold">Servicios Activos ({serviciosActivos.length})</Typography>
-                  {totalUnread > 0 && <Chip icon={<ChatIcon />} label={`${totalUnread} mensajes`} color="error" size="small" sx={{ ml: 1 }} />}
                 </Stack>
                 
                 <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} variant="fullWidth" sx={{ mb: 2 }}>
@@ -616,7 +683,7 @@ export default function RestauranteDashboard() {
                             <Grid item xs={12} sm={3}>
                               <Stack direction="row" spacing={1} alignItems="center">
                                 <Typography variant="subtitle2" fontWeight="bold">ID: {servicio.serviceId}</Typography>
-                                {unreadCount > 0 && <Badge badgeContent={unreadCount} color="error"><ChatIcon fontSize="small" color="error" /></Badge>}
+                                {/* ✅ REMOVED: Badge de mensajes aquí */}
                               </Stack>
                               <Typography variant="caption" color="text.secondary">{formatTime(servicio.createdAt)}</Typography>
                             </Grid>
@@ -634,7 +701,7 @@ export default function RestauranteDashboard() {
                             </Grid>
                             <Grid item xs={12} sm={1.5} sx={{ textAlign: 'right' }}>
                               {servicio.status === 'sin_repartidor' ? (
-                                <Tooltip title="Buscar repartidor nuevamente">
+                                <Tooltip title="Buscar repartidor">
                                   <IconButton size="small" color="warning"
                                     onClick={(e) => { e.stopPropagation(); handleRetryService(servicio.id) }}
                                     sx={{ bgcolor: 'warning.main', color: 'white' }}>
@@ -644,9 +711,10 @@ export default function RestauranteDashboard() {
                               ) : hasDriver && servicio.status !== 'entregado' ? (
                                 <Tooltip title={unreadCount > 0 ? `${unreadCount} mensajes nuevos` : 'Chat'}>
                                   <IconButton size="small" color={unreadCount > 0 ? 'error' : 'primary'}
-                                    onClick={(e) => { e.stopPropagation(); setChatService(servicio) }}
+                                    onClick={(e) => { e.stopPropagation(); setChatService(servicio); setForceShowPulse(false); }}
                                     sx={{ bgcolor: unreadCount > 0 ? 'error.main' : 'primary.main', color: 'white' }}>
-                                    <ChatIcon fontSize="small" />
+                                    {/* ✅ ADDED: Pulse animation to list icon */}
+                                    <ChatIcon fontSize="small" sx={{ animation: unreadCount > 0 ? 'pulse 1.5s infinite' : 'none', '@keyframes pulse': { '0%': { transform: 'scale(1)', opacity: 1 }, '50%': { transform: 'scale(1.2)', opacity: 0.8 }, '100%': { transform: 'scale(1)', opacity: 1 } } }} />
                                   </IconButton>
                                 </Tooltip>
                               ) : null}
@@ -655,12 +723,7 @@ export default function RestauranteDashboard() {
                           {servicio.status === 'sin_repartidor' && (
                             <Box sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'divider' }}>
                               <Alert severity="warning" sx={{ py: 0.5, borderRadius: 1 }}
-                                action={
-                                  <Button size="small" variant="outlined" color="warning" 
-                                    onClick={(e) => { e.stopPropagation(); handleRetryService(servicio.id) }}>
-                                    Reintentar
-                                  </Button>
-                                }>
+                                action={<Button size="small" variant="outlined" color="warning" onClick={(e) => { e.stopPropagation(); handleRetryService(servicio.id) }}>Reintentar</Button>}>
                                 <Typography variant="caption">No se encontró repartidor disponible</Typography>
                               </Alert>
                             </Box>
@@ -690,7 +753,7 @@ export default function RestauranteDashboard() {
                           ))}
                         </Select>
                       </FormControl>
-                      <ServiceTracker service={trackingService} onContactDriver={handleContactDriver} onChatDriver={() => setChatService(trackingService)} showMap={true} compact={isMobile} />
+                      <ServiceTracker service={trackingService} onContactDriver={handleContactDriver} onChatDriver={() => { setChatService(trackingService); setForceShowPulse(false); }} showMap={true} compact={isMobile} />
                     </Box>
                   ) : (
                     <Paper sx={{ p: 4, textAlign: 'center', bgcolor: 'grey.50' }}>
@@ -890,7 +953,11 @@ export default function RestauranteDashboard() {
               currentUser={{ id: restaurantData?.id, name: restaurantData?.name, role: 'restaurant' }}
               otherParty={{ name: chatService.driverName, role: 'driver' }}
               variant="fab"
-              onChatOpenChange={(isOpen) => { chatOpenRef.current = isOpen }}
+              forceShowPulse={forceShowPulse}
+              onChatOpenChange={(isOpen) => { 
+                chatOpenRef.current = isOpen
+                if (isOpen) setForceShowPulse(false)
+              }}
               onChatClose={() => setChatService(null)}
             />
           )}
@@ -901,7 +968,6 @@ export default function RestauranteDashboard() {
         </>
       )}
 
-      {/* Footer con versión */}
       <VersionFooter />
     </Box>
   )

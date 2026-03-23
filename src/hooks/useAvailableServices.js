@@ -23,24 +23,58 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
   const unsubscribeRef = useRef(null)
   const expirationCheckRef = useRef(null)
   const initialLoadDoneRef = useRef(false)
+  const mountedRef = useRef(true)
+  const lastLocationRef = useRef(null)
+
+  // Efecto para trackear si el componente está montado
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   // Suscribirse a servicios cuando el driver está online y tiene ubicación
   useEffect(() => {
+    // Verificar si la ubicación cambió significativamente (más de 100m)
+    const locationChanged = !lastLocationRef.current || 
+      (driverLocation?.latitude && driverLocation?.longitude && (
+        Math.abs(lastLocationRef.current.latitude - driverLocation.latitude) > 0.001 ||
+        Math.abs(lastLocationRef.current.longitude - driverLocation.longitude) > 0.001
+      ))
+
+    // Actualizar referencia de ubicación
+    if (driverLocation?.latitude && driverLocation?.longitude) {
+      lastLocationRef.current = {
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude
+      }
+    }
+
     // Limpiar suscripción anterior
     if (unsubscribeRef.current) {
+      console.log('🧹 Limpiando suscripción anterior de servicios')
       unsubscribeRef.current()
       unsubscribeRef.current = null
     }
 
     // Solo suscribir si está online y tiene ubicación válida
     if (!isOnline || !driverId || !driverLocation?.latitude || !driverLocation?.longitude) {
-      setAvailableServices([])
-      setLoading(false)
+      if (mountedRef.current) {
+        setAvailableServices([])
+        setLoading(false)
+      }
       return
     }
 
+    console.log('🔔 Suscribiendo a servicios disponibles...', { 
+      driverId, 
+      location: driverLocation,
+      isOnline 
+    })
+
     // Solo mostrar loading en la primera carga, no en cada actualización
-    if (!initialLoadDoneRef.current) {
+    if (!initialLoadDoneRef.current && mountedRef.current) {
       setLoading(true)
     }
 
@@ -49,12 +83,16 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
       driverId,
       driverLocation,
       (services) => {
+        if (!mountedRef.current) return
+        
         // Filtrar servicios no expirados
         const now = Date.now()
         const activeServices = services.filter(s => {
           const expiresAt = s.attemptExpiresAt || (s.attemptStartedAt + BROADCAST_CONFIG.WINDOW_DURATION)
           return now < expiresAt
         })
+        
+        console.log(`📦 Servicios disponibles: ${activeServices.length}`)
         
         setAvailableServices(activeServices)
         setLoading(false)
@@ -65,6 +103,7 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
 
     return () => {
       if (unsubscribeRef.current) {
+        console.log('🧹 Cleanup: desuscribiendo de servicios')
         unsubscribeRef.current()
         unsubscribeRef.current = null
       }
@@ -76,6 +115,8 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
     if (availableServices.length === 0) return
 
     const checkExpirations = () => {
+      if (!mountedRef.current) return
+      
       const now = Date.now()
       const activeServices = availableServices.filter(s => {
         const expiresAt = s.attemptExpiresAt || (s.attemptStartedAt + BROADCAST_CONFIG.WINDOW_DURATION)
@@ -83,6 +124,7 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
       })
 
       if (activeServices.length !== availableServices.length) {
+        console.log(`⏰ ${availableServices.length - activeServices.length} servicios expirados`)
         setAvailableServices(activeServices)
       }
     }
@@ -102,25 +144,39 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
       return { success: false, error: 'Datos incompletos' }
     }
 
+    console.log('✅ Aceptando servicio:', serviceId, 'para driver:', driverName)
     setAcceptingServiceId(serviceId)
     setError(null)
 
     try {
       const result = await acceptServiceBroadcast(serviceId, driverId, driverName)
 
+      if (!mountedRef.current) return result
+
       if (result.success) {
-        // Remover el servicio de la lista local
-        setAvailableServices(prev => prev.filter(s => s.serviceId !== serviceId && s.id !== serviceId))
+        console.log('✅ Servicio aceptado exitosamente')
+        // Remover TODOS los servicios de la lista local (solo puede tener uno activo)
+        setAvailableServices([])
       } else {
+        console.log('❌ Error aceptando servicio:', result.error)
         setError(result.error || 'Error al aceptar servicio')
+        // Si el error es que ya no está disponible, removerlo de la lista
+        if (result.reason === 'accepted' || result.error?.includes('no disponible')) {
+          setAvailableServices(prev => prev.filter(s => s.serviceId !== serviceId && s.id !== serviceId))
+        }
       }
 
       return result
     } catch (err) {
+      if (!mountedRef.current) return { success: false, error: err.message }
+      
+      console.error('❌ Excepción aceptando servicio:', err)
       setError(err.message)
       return { success: false, error: err.message }
     } finally {
-      setAcceptingServiceId(null)
+      if (mountedRef.current) {
+        setAcceptingServiceId(null)
+      }
     }
   }, [driverId])
 
@@ -130,8 +186,12 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
       return { success: false, error: 'Datos incompletos' }
     }
 
+    console.log('❌ Rechazando servicio:', serviceId)
+
     try {
       const result = await rejectServiceBroadcast(serviceId, driverId)
+
+      if (!mountedRef.current) return result
 
       if (result.success) {
         // Remover el servicio de la lista local
@@ -147,6 +207,7 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
 
   // Función para ignorar un servicio (solo removerlo localmente, sin notificar)
   const ignoreService = useCallback((serviceId) => {
+    console.log('🔕 Ignorando servicio:', serviceId)
     setAvailableServices(prev => prev.filter(s => s.serviceId !== serviceId && s.id !== serviceId))
   }, [])
 
@@ -155,6 +216,11 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
     if (availableServices.length === 0) return null
     return availableServices[0] // Ya están ordenados por distancia
   }, [availableServices])
+
+  // Función para limpiar errores
+  const clearError = useCallback(() => {
+    setError(null)
+  }, [])
 
   return {
     availableServices,
@@ -165,6 +231,7 @@ export const useAvailableServices = (driverId, driverLocation, isOnline) => {
     rejectService,
     ignoreService,
     getClosestService,
+    clearError,
     hasAvailableServices: availableServices.length > 0
   }
 }

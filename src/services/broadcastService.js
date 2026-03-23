@@ -8,7 +8,8 @@ import {
   off,
   update,
   get,
-  remove
+  remove,
+  onDisconnect
 } from 'firebase/database'
 import {
   collection,
@@ -32,6 +33,61 @@ export const BROADCAST_CONFIG = {
 
 const BROADCAST_PATH = 'service_broadcasts'
 const DRIVERS_LOCATION_PATH = 'drivers_locations'
+
+// ============================================
+// EXPIRATION CHECKER - NUEVO!
+// ============================================
+let expirationCheckerInterval = null
+
+/**
+ * Inicia el verificador de expiración de broadcasts
+ * Se ejecuta cada 5 segundos para verificar broadcasts expirados
+ */
+export const startExpirationChecker = () => {
+  if (expirationCheckerInterval) {
+    console.log('⚠️ Expiration checker ya está corriendo')
+    return
+  }
+
+  console.log('🕐 Iniciando verificador de expiración de broadcasts')
+
+  expirationCheckerInterval = setInterval(async () => {
+    try {
+      const broadcastsRef = ref(rtdb, BROADCAST_PATH)
+      const snapshot = await get(broadcastsRef)
+
+      if (!snapshot.exists()) return
+
+      const now = Date.now()
+
+      snapshot.forEach((child) => {
+        const data = child.val()
+
+        // Solo verificar broadcasts activos
+        if (data.status !== 'broadcasting') return
+
+        // Verificar si expiró
+        if (now > data.attemptExpiresAt) {
+          console.log(`⏰ Broadcast expirado detectado: ${child.key}`)
+          checkBroadcastExpiration(child.key)
+        }
+      })
+    } catch (error) {
+      console.error('❌ Error en expiration checker:', error)
+    }
+  }, 5000) // Cada 5 segundos
+}
+
+/**
+ * Detiene el verificador de expiración
+ */
+export const stopExpirationChecker = () => {
+  if (expirationCheckerInterval) {
+    clearInterval(expirationCheckerInterval)
+    expirationCheckerInterval = null
+    console.log('🛑 Expiration checker detenido')
+  }
+}
 
 // ============================================
 // FUNCIONES DE UTILIDAD
@@ -279,6 +335,9 @@ export const createServiceBroadcast = async (serviceId, serviceData) => {
     // Iniciar el primer ciclo de notificación
     await runBroadcastCycle(serviceId, 1)
 
+    // Iniciar el verificador de expiración si no está corriendo
+    startExpirationChecker()
+
     return { success: true, broadcastData }
   } catch (error) {
     console.error('❌ Error creando broadcast:', error)
@@ -310,7 +369,7 @@ export const runBroadcastCycle = async (serviceId, attempt) => {
       return { success: true, alreadyAccepted: true }
     }
 
-    // Obttener radio para este intento
+    // Obtener radio para este intento
     const radius = getRadiusForAttempt(attempt)
     console.log(`📍 Usando radio de ${radius}m para intento ${attempt}`)
 
@@ -404,7 +463,7 @@ export const acceptServiceBroadcast = async (serviceId, driverId, driverName) =>
 
     if (broadcastData.status !== 'broadcasting') {
       console.log('⚠️ Servicio ya no está disponible:', broadcastData.status)
-      return { success: false, error: 'Servicio ya no disponible' }
+      return { success: false, error: 'Servicio ya no disponible', reason: broadcastData.status }
     }
 
     if (Date.now() > broadcastData.attemptExpiresAt) {
@@ -412,7 +471,7 @@ export const acceptServiceBroadcast = async (serviceId, driverId, driverName) =>
       return { success: false, error: 'Tiempo expirado' }
     }
 
-    // Marcar como aceptado
+    // Marcar como aceptado en RTDB
     await update(broadcastRef, {
       status: 'accepted',
       acceptedBy: driverId,
@@ -431,6 +490,15 @@ export const acceptServiceBroadcast = async (serviceId, driverId, driverName) =>
     })
 
     console.log('✅ Servicio asignado exitosamente a:', driverName)
+
+    // 🆕 Crear el chat automáticamente
+    try {
+      const { createChatRoom } = await import('./chatService.js')
+      await createChatRoom(serviceId, broadcastData, null, { id: driverId, name: driverName })
+      console.log('✅ Chat creado automáticamente')
+    } catch (chatError) {
+      console.log('⚠️ No se pudo crear el chat:', chatError.message)
+    }
 
     return { success: true }
   } catch (error) {
@@ -542,9 +610,18 @@ export const checkBroadcastExpiration = async (serviceId) => {
       if (data.currentAttempt < data.maxAttempts) {
         console.log(`⏳ Esperando ${BROADCAST_CONFIG.RETRY_DELAY / 1000}s para reintentar...`)
 
+        // Actualizar estado mientras espera
+        await update(broadcastRef, {
+          status: 'retrying',
+          retryingAt: now
+        })
+
         setTimeout(async () => {
           const nextAttempt = data.currentAttempt + 1
           console.log(`🔄 Iniciando intento ${nextAttempt}`)
+          
+          // Resetear estado a broadcasting antes del nuevo intento
+          await update(broadcastRef, { status: 'broadcasting' })
           await runBroadcastCycle(serviceId, nextAttempt)
         }, BROADCAST_CONFIG.RETRY_DELAY)
 
@@ -608,6 +685,9 @@ export const subscribeToAvailableServices = (driverId, driverLocation, callback)
       // Verificar que este driver esté en la lista de notificados
       if (!data.notifiedDrivers || !data.notifiedDrivers[driverId]) return
 
+      // Verificar que no haya rechazado este servicio
+      if (data.rejectedDrivers && data.rejectedDrivers[driverId]) return
+
       // Calcular tiempo restante
       const timeRemaining = Math.max(0, data.attemptExpiresAt - now)
 
@@ -636,7 +716,8 @@ export const subscribeToAvailableServices = (driverId, driverLocation, callback)
         currentAttempt: data.currentAttempt,
         currentRadius: data.currentRadius,
         createdAt: data.createdAt,
-        attemptStartedAt: data.attemptStartedAt
+        attemptStartedAt: data.attemptStartedAt,
+        attemptExpiresAt: data.attemptExpiresAt
       })
     })
 
@@ -726,5 +807,7 @@ export default {
   getNearbyOnlineDrivers,
   calculateDistance,
   cleanupOldBroadcasts,
+  startExpirationChecker,
+  stopExpirationChecker,
   BROADCAST_CONFIG
 }

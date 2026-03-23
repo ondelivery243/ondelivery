@@ -71,7 +71,7 @@ export default function ChatWindow({
   const isInitializedRef = useRef(false)
   const markingAsReadRef = useRef(false)
 
-  // ⚠️ Usar valores primitivos estables
+  // Usar valores primitivos estables
   const serviceId = service?.id
   const currentUserId = currentUser?.id
   const currentUserName = currentUser?.name
@@ -86,14 +86,9 @@ export default function ChatWindow({
 
   // 🔄 Inicializar chat room SOLO UNA VEZ
   useEffect(() => {
-    if (!serviceId || !currentUserId || !currentUserRole) {
-      return
-    }
+    if (!serviceId || !currentUserId || !currentUserRole) return
 
-    // Evitar múltiples inicializaciones
-    if (isInitializedRef.current) {
-      return
-    }
+    if (isInitializedRef.current) return
     isInitializedRef.current = true
 
     const initChat = async () => {
@@ -101,7 +96,6 @@ export default function ChatWindow({
       setLoading(true)
       
       let existingChat = await getChatRoom(serviceId)
-      console.log('📋 Chat existente:', existingChat ? 'Sí' : 'No')
       
       if (!existingChat) {
         const result = await createChatRoom(
@@ -121,17 +115,15 @@ export default function ChatWindow({
     }
     
     initChat()
-  }, [serviceId, currentUserId, currentUserName, currentUserRole, service])
+  // ✅ Corregido: Usar dependencias primitivas estables
+  }, [serviceId, currentUserId, currentUserName, currentUserRole])
 
-  // 📨 Suscribirse a mensajes - CON DEPENDENCIAS ESTABLES
+  // 📨 Suscribirse a mensajes
   useEffect(() => {
     if (!serviceId) return
 
-    // Evitar múltiples suscripciones
     if (isSubscribedRef.current) return
     isSubscribedRef.current = true
-
-    console.log('🔔 ChatWindow: Configurando suscripción de mensajes para:', serviceId)
 
     const unsubscribe = subscribeToMessages(serviceId, (msgs) => {
       setMessages(msgs)
@@ -140,7 +132,6 @@ export default function ChatWindow({
     })
 
     return () => {
-      console.log('🧹 ChatWindow: Cleanup de mensajes')
       isSubscribedRef.current = false
       unsubscribe()
     }
@@ -150,16 +141,11 @@ export default function ChatWindow({
   useEffect(() => {
     if (!serviceId || !currentUserRole) return
 
-    console.log('🔔 ChatWindow: Configurando suscripción de chat room para:', serviceId)
-
     const unsubscribe = subscribeToChatRoom(serviceId, (room) => {
       setChatRoom(room)
     })
 
-    return () => {
-      console.log('🧹 ChatWindow: Cleanup de chat room')
-      unsubscribe()
-    }
+    return () => unsubscribe()
   }, [serviceId, currentUserRole])
 
   // Marcar mensajes como leídos cuando el chat está abierto
@@ -167,12 +153,8 @@ export default function ChatWindow({
     const markAsRead = async () => {
       if (open && serviceId && currentUserRole && messages.length > 0 && !markingAsReadRef.current) {
         markingAsReadRef.current = true
-        console.log('📖 ChatWindow: Marcando mensajes como leídos')
         await markMessagesAsRead(serviceId, currentUserRole)
-        // Pequeño delay para evitar llamadas duplicadas
-        setTimeout(() => {
-          markingAsReadRef.current = false
-        }, 500)
+        setTimeout(() => { markingAsReadRef.current = false }, 500)
       }
     }
     
@@ -181,9 +163,7 @@ export default function ChatWindow({
 
   // Scroll inicial
   useEffect(() => {
-    if (!loading && messages.length > 0) {
-      scrollToBottom()
-    }
+    if (!loading && messages.length > 0) scrollToBottom()
   }, [loading, messages.length, scrollToBottom])
 
   // Resetear cuando se cierra
@@ -202,8 +182,6 @@ export default function ChatWindow({
     setSending(true)
     const messageText = newMessage.trim()
     setNewMessage('')
-    
-    console.log('📤 ChatWindow: Enviando mensaje:', messageText)
     
     const result = await sendMessage(
       serviceId,
@@ -236,7 +214,6 @@ export default function ChatWindow({
     ? (chatRoom?.unreadByRestaurant || 0)
     : (chatRoom?.unreadByDriver || 0)
 
-  // Si está cerrado
   if (!open) return null
 
   // Modo mini

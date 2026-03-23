@@ -239,6 +239,10 @@ Control. Historial. Liquidaciones. Todo en un solo lugar.
             <IconButton onClick={handleShare} sx={{ color: 'text.primary' }}>
               <ShareIcon />
             </IconButton>
+            {/* ✅ ICONO DE CERRAR SESIÓN AGREGADO AQUÍ */}
+            <IconButton onClick={handleLogout} sx={{ color: 'text.primary' }}>
+              <LogoutIcon />
+            </IconButton>
           </Toolbar>
         </AppBar>
 

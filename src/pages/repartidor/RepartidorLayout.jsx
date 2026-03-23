@@ -1,5 +1,5 @@
 // src/pages/repartidor/RepartidorLayout.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation, Outlet } from 'react-router-dom'
 import {
   Box,
@@ -34,8 +34,8 @@ import {
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { useStore, useThemeStore, useDriverStore } from '../../store/useStore'
-import { getDriverByUserId } from '../../services/firestore'
-import { useDriverTracking } from '../../contexts/DriverTrackingContext'
+import { getDriverByUserId, setDriverOnline } from '../../services/firestore'
+import { setDriverOffline } from '../../services/locationService'
 
 export default function RepartidorLayout() {
   const navigate = useNavigate()
@@ -45,34 +45,30 @@ export default function RepartidorLayout() {
   const { enqueueSnackbar } = useSnackbar()
   const { user, logout } = useStore()
   const { mode, toggleTheme } = useThemeStore()
-  const { setIsOnline } = useDriverStore()
+  const { isOnline, setIsOnline } = useDriverStore()
 
   const [driverData, setDriverData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [navValue, setNavValue] = useState(0)
-
-  // Hook de tracking GPS (desde contexto global)
-  const {
-    isOnline: contextIsOnline,
-    goOnline,
-    goOffline
-  } = useDriverTracking()
-
-  // Sincronizar estado del contexto con el store local
-  useEffect(() => {
-    setIsOnline(contextIsOnline)
-  }, [contextIsOnline, setIsOnline])
+  
+  const isInitializedRef = useRef(false)
 
   // Cargar datos del repartidor
   useEffect(() => {
+    if (isInitializedRef.current) return
+    
     const loadDriverData = async () => {
       if (user?.uid) {
         const driver = await getDriverByUserId(user.uid)
         setDriverData(driver)
+        if (driver) {
+          setIsOnline(driver.isOnline || false)
+        }
+        isInitializedRef.current = true
       }
     }
     loadDriverData()
-  }, [user])
+  }, [user, setIsOnline])
 
   // Determinar tab activo
   useEffect(() => {
@@ -82,7 +78,6 @@ export default function RepartidorLayout() {
     else setNavValue(0)
   }, [location.pathname])
 
-  // Toggle online/offline - USA EL CONTEXTO
   const handleToggleOnline = async () => {
     if (!driverData?.id) {
       enqueueSnackbar('Error: No se encontró tu perfil de repartidor', { variant: 'error' })
@@ -90,28 +85,20 @@ export default function RepartidorLayout() {
     }
     
     setLoading(true)
+    const result = await setDriverOnline(driverData.id, !isOnline)
+    setLoading(false)
     
-    try {
-      if (!contextIsOnline) {
-        const success = await goOnline()
-        if (success) {
-          enqueueSnackbar('¡Ahora estás en línea!', { variant: 'success' })
-        }
-      } else {
-        const success = await goOffline()
-        if (success) {
-          enqueueSnackbar('Saliste del sistema', { variant: 'info' })
-        }
-      }
-    } catch (error) {
-      console.error('Error:', error)
+    if (result.success) {
+      setIsOnline(!isOnline)
+      enqueueSnackbar(
+        isOnline ? 'Saliste del sistema' : '¡Ahora estás en línea!', 
+        { variant: isOnline ? 'info' : 'success' }
+      )
+    } else {
       enqueueSnackbar('Error al cambiar estado', { variant: 'error' })
-    } finally {
-      setLoading(false)
     }
   }
 
-  // Función para compartir por WhatsApp
   const handleShare = () => {
     const message = `🛵 ON Delivery - Transforma la gestión de tus deliveries
 
@@ -125,7 +112,38 @@ Control. Historial. Liquidaciones. Todo en un solo lugar.
     window.open(whatsappUrl, '_blank')
   }
 
-  const handleLogout = () => {
+  // ✅ SINCRONIZAR Firestore al cerrar ventana/pestaña
+  useEffect(() => {
+    const handleBeforeUnload = async () => {
+      if (isOnline && driverData?.id) {
+        console.log('🚪 [Layout] Cerrando ventana - marcando offline en Firestore')
+        try {
+          await setDriverOnline(driverData.id, false)
+          console.log('✅ [Layout] Firestore actualizado a offline')
+        } catch (e) {
+          console.error('❌ [Layout] Error sincronizando:', e)
+        }
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isOnline, driverData?.id])
+
+  // ✅ Logout con sincronización ANTES de cerrar sesión
+  const handleLogout = async () => {
+    if (isOnline && driverData?.id) {
+      try {
+        console.log('🚪 [Logout] Marcando driver offline antes de cerrar sesión...')
+        await setDriverOnline(driverData.id, false)
+        await setDriverOffline(driverData.id)
+        console.log('✅ [Logout] Driver marcado offline en ambas bases de datos')
+      } catch (e) {
+        console.error('❌ [Logout] Error marcando offline:', e)
+      }
+    }
+    
+    setIsOnline(false)
     logout()
     navigate('/login')
     enqueueSnackbar('Sesión cerrada', { variant: 'info' })
@@ -172,16 +190,16 @@ Control. Historial. Liquidaciones. Todo en un solo lugar.
             <Typography variant="subtitle2" fontWeight="bold" color="text.primary">
               ON Delivery
             </Typography>
-            <Typography variant="caption" sx={{ color: contextIsOnline ? 'success.main' : 'text.secondary' }}>
-              {contextIsOnline ? '🟢 En línea' : '🔴 Fuera de línea'}
+            <Typography variant="caption" sx={{ color: isOnline ? 'success.main' : 'text.secondary' }}>
+              {isOnline ? '🟢 En línea' : '🔴 Fuera de línea'}
             </Typography>
           </Box>
           
           {/* Quick Online Toggle */}
           <Button
             size="small"
-            variant={contextIsOnline ? 'contained' : 'outlined'}
-            color={contextIsOnline ? 'success' : 'primary'}
+            variant={isOnline ? 'contained' : 'outlined'}
+            color={isOnline ? 'success' : 'primary'}
             onClick={handleToggleOnline}
             disabled={loading}
             startIcon={<PowerIcon sx={{ fontSize: 16 }} />}
@@ -192,7 +210,7 @@ Control. Historial. Liquidaciones. Todo en un solo lugar.
               px: 1.5
             }}
           >
-            {contextIsOnline ? 'Online' : 'Offline'}
+            {isOnline ? 'Online' : 'Offline'}
           </Button>
           
           <IconButton onClick={toggleTheme} sx={{ color: 'text.primary' }} size="small">

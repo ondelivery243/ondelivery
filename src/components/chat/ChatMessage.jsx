@@ -99,16 +99,12 @@ const ChatMessage = memo(function ChatMessage({
                 display: 'block',
                 textDecoration: 'none',
                 cursor: 'pointer',
-                '&:hover': {
-                  opacity: 0.9
-                }
+                '&:hover': { opacity: 0.9 }
               }}
             >
               <Stack direction="row" spacing={1} alignItems="center">
                 <LocationIcon sx={{ fontSize: 20 }} />
-                <Typography variant="body2" fontWeight="medium">
-                  Ver ubicación
-                </Typography>
+                <Typography variant="body2" fontWeight="medium">Ver ubicación</Typography>
               </Stack>
               {metadata.address && (
                 <Typography variant="caption" sx={{ display: 'block', mt: 0.5, opacity: 0.8 }}>
@@ -116,23 +112,9 @@ const ChatMessage = memo(function ChatMessage({
                 </Typography>
               )}
             </Paper>
-            <Stack 
-              direction="row" 
-              spacing={0.5} 
-              alignItems="center" 
-              justifyContent={isCurrentUser ? 'flex-end' : 'flex-start'}
-              sx={{ mt: 0.5 }}
-            >
-              <Typography variant="caption" color="text.disabled">
-                {formatChatTime(timestamp)}
-              </Typography>
-              {isCurrentUser && (
-                read ? (
-                  <DoneAllIcon sx={{ fontSize: 14, color: 'primary.main' }} />
-                ) : (
-                  <CheckIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
-                )
-              )}
+            <Stack direction="row" spacing={0.5} alignItems="center" justifyContent={isCurrentUser ? 'flex-end' : 'flex-start'} sx={{ mt: 0.5 }}>
+              <Typography variant="caption" color="text.disabled">{formatChatTime(timestamp)}</Typography>
+              {isCurrentUser && (read ? <DoneAllIcon sx={{ fontSize: 14, color: 'primary.main' }} /> : <CheckIcon sx={{ fontSize: 14, color: 'text.disabled' }} />)}
             </Stack>
           </Box>
         </Box>
@@ -140,31 +122,18 @@ const ChatMessage = memo(function ChatMessage({
     )
   }
 
-  // Mensaje de texto normal
+  // Mensaje de texto normal (Estilo WhatsApp)
   return (
-    <Box sx={{ 
-      display: 'flex', 
-      justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
-      mb: 1.5
-    }}>
+    <Box sx={{ display: 'flex', justifyContent: isCurrentUser ? 'flex-end' : 'flex-start', mb: 1.5 }}>
       <Box sx={{ maxWidth: '80%', display: 'flex', flexDirection: isCurrentUser ? 'row-reverse' : 'row', gap: 1 }}>
         {showAvatar && !isCurrentUser && (
-          <Avatar 
-            sx={{ 
-              width: 28, 
-              height: 28, 
-              bgcolor: senderRole === 'restaurant' ? 'primary.main' : 'success.main',
-              fontSize: '0.75rem'
-            }}
-          >
+          <Avatar sx={{ width: 28, height: 28, bgcolor: senderRole === 'restaurant' ? 'primary.main' : 'success.main', fontSize: '0.75rem' }}>
             {senderRole === 'restaurant' ? <StoreIcon sx={{ fontSize: 16 }} /> : <BikeIcon sx={{ fontSize: 16 }} />}
           </Avatar>
         )}
         <Box>
           {!isCurrentUser && (
-            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              {senderName}
-            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>{senderName}</Typography>
           )}
           <Paper
             sx={{
@@ -178,27 +147,11 @@ const ChatMessage = memo(function ChatMessage({
               wordBreak: 'break-word'
             }}
           >
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {text}
-            </Typography>
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{text}</Typography>
           </Paper>
-          <Stack 
-            direction="row" 
-            spacing={0.5} 
-            alignItems="center" 
-            justifyContent={isCurrentUser ? 'flex-end' : 'flex-start'}
-            sx={{ mt: 0.5 }}
-          >
-            <Typography variant="caption" color="text.disabled">
-              {formatChatTime(timestamp)}
-            </Typography>
-            {isCurrentUser && (
-              read ? (
-                <DoneAllIcon sx={{ fontSize: 14, color: 'primary.main' }} />
-              ) : (
-                <CheckIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
-              )
-            )}
+          <Stack direction="row" spacing={0.5} alignItems="center" justifyContent={isCurrentUser ? 'flex-end' : 'flex-start'} sx={{ mt: 0.5 }}>
+            <Typography variant="caption" color="text.disabled">{formatChatTime(timestamp)}</Typography>
+            {isCurrentUser && (read ? <DoneAllIcon sx={{ fontSize: 14, color: 'primary.main' }} /> : <CheckIcon sx={{ fontSize: 14, color: 'text.disabled' }} />)}
           </Stack>
         </Box>
       </Box>

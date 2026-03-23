@@ -547,7 +547,11 @@ export const createService = async (serviceData) => {
     console.log('📢 Iniciando broadcast...')
     
     try {
-      const { createServiceBroadcast } = await import('./broadcastService.js')
+      const { createServiceBroadcast, startExpirationChecker } = await import('./broadcastService.js')
+      
+      // Iniciar el verificador de expiración global
+      startExpirationChecker()
+      
       const broadcastResult = await createServiceBroadcast(docRef.id, {
         ...serviceData,
         serviceId,
