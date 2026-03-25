@@ -38,7 +38,8 @@ import {
   Refresh as RefreshIcon,
   TwoWheeler as DeliveryIcon,
   CurrencyExchange as ExchangeIcon,
-  Update as UpdateIcon
+  Update as UpdateIcon,
+  CalendarToday as CalendarIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { formatCurrency, formatDate, formatTime } from '../../store/useStore'
@@ -69,6 +70,7 @@ export default function AdminDashboard() {
   const [restaurants, setRestaurants] = useState([])
   const [drivers, setDrivers] = useState([])
   const [exchangeRate, setExchangeRate] = useState({ rate: 0, lastUpdate: null })
+  const [fechaValor, setFechaValor] = useState(null) // 🆕 Fecha valor del BCV
   const [loading, setLoading] = useState(true)
   const [refreshingRate, setRefreshingRate] = useState(false)
   
@@ -86,6 +88,11 @@ export default function AdminDashboard() {
     const unsubDrivers = subscribeToDrivers((data) => setDrivers(data))
     const unsubExchangeRate = subscribeToExchangeRate((data) => {
       setExchangeRate(data)
+      
+      // 🆕 Actualizar fecha valor si viene en los datos
+      if (data.fechaValor) {
+        setFechaValor(data.fechaValor)
+      }
       
       // Solo actualizar la fecha mostrada si el VALOR de la tasa cambió
       if (data.rate && data.rate !== prevRateRef.current) {
@@ -179,7 +186,7 @@ export default function AdminDashboard() {
                 <ExchangeIcon sx={{ fontSize: { xs: 24, sm: 32 } }} />
               </Box>
               
-              {/* Bloque de Texto: Título, Valor y Fecha */}
+              {/* Bloque de Texto: Título, Valor y Fechas */}
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="body2" sx={{ opacity: 0.8, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                   Tasa del Día
@@ -187,12 +194,22 @@ export default function AdminDashboard() {
                 <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
                   {formatExchangeRate(exchangeRate.rate)} Bs/$                 </Typography>
               
-                {/* Fecha - Solo se actualiza cuando el VALOR cambia */}
+                {/* Fecha Actualización - Solo se actualiza cuando el VALOR cambia */}
                 {rateUpdateDisplay.date && (
                   <Stack direction="row" spacing={0.5} alignItems="center" sx={{ opacity: 0.9, mt: 0.5 }}>
                     <UpdateIcon sx={{ fontSize: 14 }} />
                     <Typography variant="body2" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                       Actualizado: {formatUpdateDate(rateUpdateDisplay.date)}
+                    </Typography>
+                  </Stack>
+                )}
+                
+                {/* 🆕 Fecha Valor del BCV */}
+                {fechaValor && (
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ opacity: 0.9, mt: 0.5 }}>
+                    <CalendarIcon sx={{ fontSize: 14 }} />
+                    <Typography variant="body2" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
+                      Fecha Valor: {fechaValor}
                     </Typography>
                   </Stack>
                 )}

@@ -1070,13 +1070,14 @@ export const getExchangeRate = async () => {
         rate: data.exchangeRate || 0,
         lastUpdate: data.lastUpdate?.toDate?.() || null,
         previousRate: data.previousRate || 0,
-        source: data.source || 'bcv.justcarlux.dev'
+        fechaValor: data.fechaValor || null,
+        source: data.source || 'api-bcv-1vq1.onrender.com'
       }
     }
-    return { rate: 0, lastUpdate: null, previousRate: 0 }
+    return { rate: 0, lastUpdate: null, previousRate: 0, fechaValor: null }
   } catch (error) {
     console.error('Error obteniendo tasa de cambio:', error)
-    return { rate: 0, lastUpdate: null, previousRate: 0 }
+    return { rate: 0, lastUpdate: null, previousRate: 0, fechaValor: null }
   }
 }
 
@@ -1090,10 +1091,11 @@ export const subscribeToExchangeRate = (callback) => {
           rate: data.exchangeRate || 0,
           lastUpdate: data.lastUpdate?.toDate?.() || null,
           previousRate: data.previousRate || 0,
-          source: data.source || 'bcv.justcarlux.dev'
+          fechaValor: data.fechaValor || null,
+          source: data.source || 'api-bcv-1vq1.onrender.com'
         })
       } else {
-        callback({ rate: 0, lastUpdate: null, previousRate: 0 })
+        callback({ rate: 0, lastUpdate: null, previousRate: 0, fechaValor: null })
       }
     },
     handleSnapshotError

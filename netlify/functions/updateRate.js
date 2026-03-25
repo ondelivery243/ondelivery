@@ -1,7 +1,8 @@
 // netlify/functions/updateRate.js
 import admin from 'firebase-admin';
 
-const ALCAMBIO_API_URL = 'https://api-alcambio.onrender.com/tasas';
+// 🆕 NUEVA API BCV
+const BCV_API_URL = 'https://api-bcv-1vq1.onrender.com/tasas';
 const TIMEOUT_MS = 30000; // 30 segundos
 
 let db = null;
@@ -43,12 +44,12 @@ export const handler = async (event) => {
     const docSnap = await configRef.get();
     const currentRate = docSnap.exists ? (docSnap.data().exchangeRate || 0) : 0;
 
-    console.log('🔄 Obteniendo tasa desde API...');
+    console.log('🔄 Obteniendo tasa desde API BCV...');
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const response = await fetch(ALCAMBIO_API_URL, { signal: controller.signal });
+    const response = await fetch(BCV_API_URL, { signal: controller.signal });
     clearTimeout(timeoutId);
 
     if (!response.ok) throw new Error(`Error API: ${response.status}`);
@@ -56,11 +57,13 @@ export const handler = async (event) => {
     const data = await response.json();
     console.log('📦 Respuesta API:', JSON.stringify(data));
     
-    // La API devuelve: { tasas: { dolar: 451.50, euro: 520.64, usdt: 666.19 } }
-    const newRate = data?.tasas?.dolar;
+    // 🆕 NUEVA ESTRUCTURA: { tasas: [{ codigo: "USD", tasa: 462.67 }, ...], fecha_valor: "..." }
+    const usdRate = data?.tasas?.find(t => t.codigo === 'USD');
+    const newRate = usdRate?.tasa;
+    const fechaValor = data?.fecha_valor; // 🆕 Fecha valor del BCV
     
     if (!newRate || typeof newRate !== 'number') {
-      throw new Error(`Formato inesperado - no se encontro dolar. Respuesta: ${JSON.stringify(data)}`);
+      throw new Error(`Formato inesperado - no se encontro USD. Respuesta: ${JSON.stringify(data)}`);
     }
 
     if (newRate < 1 || newRate > 1000) return { 
@@ -75,23 +78,37 @@ export const handler = async (event) => {
     if (currentFormatted === newFormatted) {
       return { 
         statusCode: 200, 
-        body: JSON.stringify({ success: true, message: 'Sin cambios', rate: newRate }), 
+        body: JSON.stringify({ 
+          success: true, 
+          message: 'Sin cambios', 
+          rate: newRate,
+          fechaValor: fechaValor // 🆕
+        }), 
         headers: securityHeaders 
       };
     }
 
+    // 🆕 Guardar con fechaValor
     await configRef.set({
-      exchangeRate: newRate,
+      exchangeRate: Number(newRate),
+      fechaValor: fechaValor, // 🆕 Fecha valor del BCV
       lastUpdate: admin.firestore.FieldValue.serverTimestamp(),
       previousRate: currentRate,
-      source: 'api-alcambio.onrender.com'
+      source: 'api-bcv-1vq1.onrender.com'
     }, { merge: true });
 
-    console.log('✅ Tasa actualizada:', newRate);
+    console.log('✅ Tasa actualizada:', newRate, '| Fecha Valor:', fechaValor);
 
     return { 
       statusCode: 200, 
-      body: JSON.stringify({ success: true, updated: true, rate: newRate }), 
+      body: JSON.stringify({ 
+        success: true, 
+        updated: true, 
+        rate: newRate,
+        previousRate: currentRate,
+        fechaValor: fechaValor, // 🆕
+        message: `Tasa actualizada: ${newRate} Bs/$`
+      }), 
       headers: securityHeaders 
     };
 

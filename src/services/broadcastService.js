@@ -546,10 +546,11 @@ export const rejectServiceBroadcast = async (serviceId, driverId) => {
     console.log(`📊 Drivers restantes disponibles: ${remainingDrivers.length}`)
 
     // Actualizar broadcast
+    // NOTA: No usar puntos (.) en las claves de RTDB
+    // rejectedDrivers ya contiene el registro del rechazo con timestamp
     await update(broadcastRef, {
       rejectedDrivers,
-      notifiedDrivers,
-      [`rejectedBy.${driverId}`]: Date.now()
+      notifiedDrivers
     })
 
     // Si no quedan drivers disponibles, intentar siguiente ciclo inmediatamente

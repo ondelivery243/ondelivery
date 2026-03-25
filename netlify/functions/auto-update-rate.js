@@ -1,7 +1,8 @@
 // netlify/functions/auto-update-rate.js
 import admin from 'firebase-admin';
 
-const API_URL = 'https://api-alcambio.onrender.com/tasas';
+// 🆕 NUEVA API BCV
+const API_URL = 'https://api-bcv-1vq1.onrender.com/tasas';
 
 let db = null;
 
@@ -102,7 +103,11 @@ export const handler = async (event, context) => {
       if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
 
       const data = await response.json();
-      const rate = data?.tasas?.dolar;
+      
+      // 🆕 NUEVA ESTRUCTURA: extraer USD del array de tasas
+      const usdRate = data?.tasas?.find(t => t.codigo === 'USD');
+      const rate = usdRate?.tasa;
+      const fechaValor = data?.fecha_valor; // 🆕 Fecha valor del BCV
 
       if (!rate || isNaN(parseFloat(rate))) {
         throw new Error(`Valor dolar inválido recibido`);
@@ -127,6 +132,7 @@ export const handler = async (event, context) => {
             updated: false,
             rate: parseFloat(rate),
             previousRate: parseFloat(previousRate),
+            fechaValor: fechaValor, // 🆕
             time: `${currentHour}:${String(currentMinute).padStart(2, '0')}`,
             message: `Tasa sin cambios: ${rate} Bs/$`
           }) 
@@ -136,9 +142,10 @@ export const handler = async (event, context) => {
       // ✅ LA TASA CAMBIÓ - Escribir en Firestore
       await db.collection('settings').doc('app_config').set({
         exchangeRate: Number(rate),
+        fechaValor: fechaValor, // 🆕 Guardar fecha valor del BCV
         lastUpdate: admin.firestore.FieldValue.serverTimestamp(),
         previousRate: previousRate,
-        source: 'api-alcambio.onrender.com'
+        source: 'api-bcv-1vq1.onrender.com'
       }, { merge: true });
 
       console.log(`✅ Tasa ACTUALIZADA: ${rate} Bs/$ (anterior: ${previousRate})`);
@@ -151,6 +158,7 @@ export const handler = async (event, context) => {
           updated: true,
           rate: parseFloat(rate),
           previousRate: parseFloat(previousRate),
+          fechaValor: fechaValor, // 🆕
           time: `${currentHour}:${String(currentMinute).padStart(2, '0')}`,
           message: `Tasa actualizada: ${rate} Bs/$`
         }) 
