@@ -6,7 +6,7 @@ import {
   Select, MenuItem, FormControl, InputAdornment, Dialog, DialogTitle, DialogContent,
   DialogActions, useTheme, useMediaQuery, Paper, LinearProgress, Collapse,
   IconButton, Tooltip, Tab, Tabs, Badge, Alert, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Skeleton
+  TableContainer, TableHead, TableRow, Skeleton, Autocomplete
 } from '@mui/material'
 import {
   Add as AddIcon, TwoWheeler as DeliveryIcon, LocationOn as LocationIcon,
@@ -16,7 +16,8 @@ import {
   AttachMoney as MoneyIcon, Chat as ChatIcon, Star as StarIcon, Map as MapIcon,
   List as ListIcon, Notifications as NotificationIcon, CalendarToday as CalendarIcon,
   Today as TodayIcon, DateRange as WeekIcon, CalendarMonth as MonthIcon,
-  TrendingUp as TrendingUpIcon, ArrowForward as ArrowIcon, Update as UpdateIcon
+  TrendingUp as TrendingUpIcon, ArrowForward as ArrowIcon, Update as UpdateIcon,
+  Search as SearchIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { formatCurrency, formatTime, formatDate, useRestaurantStore, useStore } from '../../store/useStore'
@@ -1212,20 +1213,55 @@ export default function RestauranteDashboard() {
             </DialogTitle>
             <DialogContent>
               <Grid container spacing={{ xs: 1.5, sm: 2 }} sx={{ mt: 0.5 }}>
+                
+                {/* Zona de Entrega - MEJORADO CON AUTOCOMPLETE */}
                 <Grid item xs={12}>
-                  <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Zona de Entrega *</Typography>
-                  <FormControl fullWidth size={isMobile ? 'small' : 'medium'}>
-                    <Select value={nuevoServicio.zona} onChange={(e) => setNuevoServicio({ ...nuevoServicio, zona: e.target.value })} displayEmpty
-                      renderValue={(value) => {
-                        if (!value) return <Typography color="text.disabled">Selecciona una zona</Typography>
-                        const zona = zones.find(z => z.id === value)
-                        return zona ? `${zona.name} - ${formatCurrency(zona.price)}` : ''
-                      }}>
-                      {zones.map((zona) => (
-                        <MenuItem key={zona.id} value={zona.id}>{zona.name} - {formatCurrency(zona.price)}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                  <Typography variant="body2" fontWeight="medium" sx={{ mb: 1.5 }}>Zona de Entrega *</Typography>
+                  <Autocomplete
+                    fullWidth
+                    size={isMobile ? 'small' : 'medium'}
+                    options={zones}
+                    openOnFocus
+                    getOptionLabel={(option) => `${option.name} - ${formatCurrency(option.price)}`}
+                    value={zones.find(z => z.id === nuevoServicio.zona) || null}
+                    onChange={(event, newValue) => {
+                      setNuevoServicio({ 
+                        ...nuevoServicio, 
+                        zona: newValue ? newValue.id : '' 
+                      })
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Selecciona o busca una zona"
+                        placeholder="Escribe para filtrar..."
+                        helperText="💡 Escribe para encontrar tu zona rápidamente"
+                        InputProps={{
+                          ...params.InputProps,
+                          startAdornment: (
+                            <InputAdornment position="start">
+                              <SearchIcon color="action" />
+                            </InputAdornment>
+                          )
+                        }}
+                      />
+                    )}
+                    noOptionsText="No hay zonas disponibles"
+                    isOptionEqualToValue={(option, value) => option.id === value.id}
+                    renderOption={(props, option) => {
+                      const { key, ...otherProps } = props;
+                      return (
+                        <li key={option.id} {...otherProps}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                            <Typography variant="body2" fontWeight="medium">{option.name}</Typography>
+                            <Typography variant="body2" color="primary.main" fontWeight="bold">
+                              {formatCurrency(option.price)}
+                            </Typography>
+                          </Box>
+                        </li>
+                      );
+                    }}
+                  />
                 </Grid>
                 
                 <Grid item xs={12}>

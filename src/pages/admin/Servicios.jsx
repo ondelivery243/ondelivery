@@ -35,7 +35,8 @@ import {
   Collapse,
   Tooltip,
   Divider,
-  Alert
+  Alert,
+  Autocomplete
 } from '@mui/material'
 import {
   Search as SearchIcon,
@@ -734,34 +735,56 @@ export default function AdminServicios() {
               </FormControl>
             </Grid>
             
-            {/* Zona de Entrega */}
+            {/* Zona de Entrega - MEJORADO CON AUTOCOMPLETE */}
             <Grid item xs={12}>
-              <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Zona de Entrega *</Typography>
-              <FormControl fullWidth size={isMobile ? 'small' : 'medium'} required>
-                <Select
-                  value={newService.zoneId}
-                  onChange={(e) => {
-                    const zone = zones.find(z => z.id === e.target.value)
-                    setNewService(prev => ({
-                      ...prev,
-                      zoneId: e.target.value,
-                      zoneName: zone?.name || ''
-                    }))
-                  }}
-                  displayEmpty
-                  renderValue={(value) => {
-                    if (!value) return <Typography color="text.disabled">Selecciona una zona</Typography>
-                    const zone = zones.find(z => z.id === value)
-                    return zone ? `${zone.name} - ${formatCurrency(zone.price)}` : ''
-                  }}
-                >
-                  {activeZones.map((zone) => (
-                    <MenuItem key={zone.id} value={zone.id}>
-                      {zone.name} - {formatCurrency(zone.price)}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Typography variant="body2" fontWeight="medium" sx={{ mb: 1.5 }}>Zona de Entrega *</Typography>
+              <Autocomplete
+                fullWidth
+                size={isMobile ? 'small' : 'medium'}
+                options={activeZones}
+                openOnFocus
+                getOptionLabel={(option) => `${option.name} - ${formatCurrency(option.price)}`}
+                value={activeZones.find(z => z.id === newService.zoneId) || null}
+                onChange={(event, newValue) => {
+                  setNewService(prev => ({
+                    ...prev,
+                    zoneId: newValue ? newValue.id : '',
+                    zoneName: newValue ? newValue.name : ''
+                  }))
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Selecciona o busca una zona"
+                    placeholder="Escribe para filtrar rápido..."
+                    helperText="💡 Escribe el nombre de la zona para filtrar la lista"
+                    required
+                    InputProps={{
+                      ...params.InputProps,
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon color="action" />
+                        </InputAdornment>
+                      )
+                    }}
+                  />
+                )}
+                noOptionsText="No se encontraron zonas"
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+                renderOption={(props, option) => {
+                  const { key, ...otherProps } = props;
+                  return (
+                    <li key={option.id} {...otherProps}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                        <Typography variant="body2" fontWeight="medium">{option.name}</Typography>
+                        <Typography variant="body2" color="primary.main" fontWeight="bold">
+                          {formatCurrency(option.price)}
+                        </Typography>
+                      </Box>
+                    </li>
+                  );
+                }}
+              />
             </Grid>
             
             {/* Dirección de Entrega */}

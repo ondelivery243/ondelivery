@@ -42,7 +42,6 @@ import {
   Schedule as PendingIcon,
   TwoWheeler as BikeIcon,
   LocationOn as LocationIcon,
-  AttachMoney as MoneyIcon,
   Phone as PhoneIcon,
   Person as PersonIcon,
   AccessTime as TimeIcon,
@@ -124,7 +123,7 @@ export default function RestauranteHistorial() {
   const currentYear = new Date().getFullYear()
   const currentWeekId = getCurrentWeekId()
 
-  // Cargar datos del restaurante y suscribirse a servicios - TIEMPO REAL
+  // Cargar datos - TIEMPO REAL
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
@@ -142,7 +141,6 @@ export default function RestauranteHistorial() {
       }
       
       if (restaurant?.id) {
-        // Suscripción en tiempo real a servicios del restaurante
         const unsubServices = subscribeToRestaurantServices(restaurant.id, (servicesData) => {
           setServices(servicesData)
           setLoading(false)
@@ -163,14 +161,11 @@ export default function RestauranteHistorial() {
   // 📝 FUNCIONES DE FORMATO
   // ============================================
   
-  // Formato de moneda sin "RD" duplicado
+  // Formato de moneda manual - SIEMPRE muestra $5.00
   const formatCurrency = (amount) => {
     if (amount === undefined || amount === null || isNaN(amount)) return '$0.00'
-    return new Intl.NumberFormat('es-DO', {
-      style: 'currency',
-      currency: 'DOP',
-      minimumFractionDigits: 2
-    }).format(amount).replace('RD$', '$')
+    const num = Number(amount)
+    return '$' + num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   }
   
   // Formato de fecha: 27/03/2026 12:59 p. m.
@@ -200,10 +195,8 @@ export default function RestauranteHistorial() {
   // 📊 ESTADÍSTICAS Y FILTRADO
   // ============================================
   
-  // Servicios filtrados
   const filteredServices = useMemo(() => {
     return services.filter(service => {
-      // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
         const serviceId = service.serviceId?.toLowerCase() || ''
@@ -248,12 +241,10 @@ export default function RestauranteHistorial() {
     })
   }, [services, searchQuery, statusFilter, dateFrom, dateTo])
   
-  // Estadísticas
   const stats = useMemo(() => {
     const delivered = filteredServices.filter(s => s.status === 'entregado')
     const totalFees = delivered.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
     
-    // Semana actual
     const monday = new Date(currentWeekId)
     monday.setHours(0, 0, 0, 0)
     const sunday = getSunday(monday)
@@ -267,7 +258,6 @@ export default function RestauranteHistorial() {
     
     const weekTotal = weekServices.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
     
-    // Todos los tiempos
     const allTimeDelivered = services.filter(s => s.status === 'entregado')
     const allTimeTotal = allTimeDelivered.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
     
@@ -341,7 +331,6 @@ export default function RestauranteHistorial() {
     setPage(0)
   }
   
-  // Servicios paginados
   const paginatedServices = filteredServices.slice(
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
@@ -399,7 +388,7 @@ export default function RestauranteHistorial() {
         </Button>
       </Box>
 
-      {/* Quick Stats - 4 tarjetas */}
+      {/* Quick Stats */}
       <Grid container spacing={2}>
         <Grid item xs={6} sm={3}>
           <Card elevation={0} sx={{ bgcolor: 'grey.100', height: '100%' }}>
@@ -483,7 +472,6 @@ export default function RestauranteHistorial() {
             </Typography>
           </Box>
           
-          {/* Fila 1: Búsqueda */}
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12}>
               <TextField
@@ -503,7 +491,6 @@ export default function RestauranteHistorial() {
             </Grid>
           </Grid>
           
-          {/* Fila 2: Estado y Fechas */}
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
@@ -660,10 +647,11 @@ export default function RestauranteHistorial() {
         />
       </Card>
 
-      {/* Detail Modal */}
+      {/* Detail Modal - PANTALLA COMPLETA EN MÓVIL */}
       <Dialog
         open={detailModalOpen}
         onClose={handleCloseDetail}
+        fullScreen={isMobile}
         maxWidth="sm"
         fullWidth
       >
@@ -703,17 +691,17 @@ export default function RestauranteHistorial() {
                 />
               </Box>
               
-              {/* Info Grid */}
+              {/* Info Grid - UNA COLUMNA EN MÓVIL */}
               <Grid container spacing={2} sx={{ mb: 3 }}>
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <TimeIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Fecha y Hora
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium">
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {formatDateTime(selectedService.createdAt)}
                         </Typography>
                       </Box>
@@ -721,15 +709,15 @@ export default function RestauranteHistorial() {
                   </Paper>
                 </Grid>
                 
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <LocationIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Zona
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium" noWrap>
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {selectedService.zoneName || 'N/A'}
                         </Typography>
                       </Box>
@@ -737,15 +725,15 @@ export default function RestauranteHistorial() {
                   </Paper>
                 </Grid>
                 
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <BikeIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Repartidor
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium" noWrap>
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {selectedService.driverName || 'Sin asignar'}
                         </Typography>
                       </Box>
@@ -753,15 +741,15 @@ export default function RestauranteHistorial() {
                   </Paper>
                 </Grid>
                 
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <PersonIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Cliente
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium" noWrap>
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {selectedService.clientName || 'No especificado'}
                         </Typography>
                       </Box>
@@ -776,24 +764,21 @@ export default function RestauranteHistorial() {
               </Typography>
               <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: 'grey.50' }}>
                 <Stack spacing={1.5}>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <PersonIcon fontSize="small" color="action" />
+                  <Box>
                     <Typography variant="body2">
                       <strong>Nombre:</strong> {selectedService.clientName || 'No especificado'}
                     </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <PhoneIcon fontSize="small" color="action" />
+                  </Box>
+                  <Box>
                     <Typography variant="body2">
                       <strong>Teléfono:</strong> {selectedService.clientPhone || 'No especificado'}
                     </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={1} alignItems="flex-start">
-                    <LocationIcon fontSize="small" color="action" sx={{ mt: 0.3 }} />
-                    <Typography variant="body2">
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
                       <strong>Dirección:</strong> {selectedService.deliveryAddress || 'No especificada'}
                     </Typography>
-                  </Stack>
+                  </Box>
                 </Stack>
               </Paper>
               
@@ -804,7 +789,7 @@ export default function RestauranteHistorial() {
                     Notas
                   </Typography>
                   <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                    <Typography variant="body2">
+                    <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
                       {selectedService.notes}
                     </Typography>
                   </Paper>
@@ -878,7 +863,7 @@ export default function RestauranteHistorial() {
             <Divider />
             
             <DialogActions sx={{ px: 3, py: 2 }}>
-              <Button onClick={handleCloseDetail} variant="contained">
+              <Button onClick={handleCloseDetail} variant="contained" fullWidth={isMobile}>
                 Cerrar
               </Button>
             </DialogActions>

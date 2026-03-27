@@ -3,7 +3,7 @@
 // Actualizar este archivo con cada release
 
 export const APP_CONFIG = {
-  version: '1.1.6',
+  version: '1.1.7',
   buildDate: new Date().toISOString().split('T')[0],
   releaseNotes: [
         "Mejoras y correcciones de errores",

@@ -31,8 +31,76 @@ import {
   PersonAdd as RegisterIcon
 } from '@mui/icons-material'
 import { useStore, formatCurrency, useThemeStore } from '../store/useStore'
-import { getZones } from '../services/firestore'
+import { subscribeToZones } from '../services/firestore'
 import { RIDERY_COLORS } from '../theme/theme'
+
+// Componente para fila de zonas con scroll infinito
+function ZoneScroller({ zones, direction = 'left', speed = 30 }) {
+  const duplicatedZones = [...zones, ...zones]
+  
+  return (
+    <Box
+      sx={{
+        overflow: 'hidden',
+        py: 1,
+        '&:hover': {
+          '& .zone-scroll': {
+            animationPlayState: 'paused'
+          }
+        }
+      }}
+    >
+      <Box
+        className="zone-scroll"
+        sx={{
+          display: 'flex',
+          gap: 2,
+          animation: `scroll-${direction} ${speed}s linear infinite`,
+          width: 'fit-content',
+          '@keyframes scroll-left': {
+            '0%': { transform: 'translateX(0)' },
+            '100%': { transform: 'translateX(-50%)' }
+          },
+          '@keyframes scroll-right': {
+            '0%': { transform: 'translateX(-50%)' },
+            '100%': { transform: 'translateX(0)' }
+          }
+        }}
+      >
+        {duplicatedZones.map((zone, index) => (
+          <Card
+            key={`${zone.id}-${index}`}
+            elevation={0}
+            sx={{
+              minWidth: 140,
+              flexShrink: 0,
+              textAlign: 'center',
+              px: 2,
+              py: 1.5,
+              border: 1,
+              borderColor: 'divider',
+              borderRadius: 2,
+              transition: 'all 0.2s',
+              '&:hover': {
+                borderColor: RIDERY_COLORS.primary,
+                bgcolor: 'rgba(0, 200, 83, 0.08)',
+                transform: 'scale(1.05)'
+              }
+            }}
+          >
+            <LocationIcon sx={{ color: RIDERY_COLORS.primary, fontSize: 20, mb: 0.5 }} />
+            <Typography variant="subtitle2" fontWeight="bold" color="text.primary" noWrap>
+              {zone.name}
+            </Typography>
+            <Typography variant="caption" fontWeight="medium" color="primary.main">
+              {formatCurrency(zone.price)}
+            </Typography>
+          </Card>
+        ))}
+      </Box>
+    </Box>
+  )
+}
 
 export default function Landing() {
   const navigate = useNavigate()
@@ -43,21 +111,17 @@ export default function Landing() {
   const [zones, setZones] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // Cargar zonas desde Firestore (lectura pública)
+  // ✅ SUSCRIPCIÓN EN TIEMPO REAL a zonas
   useEffect(() => {
-    const fetchZones = async () => {
-      try {
-        const fetchedZones = await getZones()
-        const activeZones = fetchedZones.filter(zone => zone.active)
-        setZones(activeZones)
-      } catch (error) {
-        console.error('Error cargando zonas:', error)
-        setZones([])
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchZones()
+    setLoading(true)
+    
+    const unsubscribe = subscribeToZones((allZones) => {
+      const activeZones = allZones.filter(zone => zone.active)
+      setZones(activeZones)
+      setLoading(false)
+    })
+    
+    return () => unsubscribe()
   }, [])
 
   // Redirigir si ya está logueado
@@ -72,12 +136,25 @@ export default function Landing() {
     }
   }, [user, navigate])
 
+  // Dividir zonas en 3 filas
+  const getZoneRows = () => {
+    if (zones.length === 0) return [[], [], []]
+    
+    const rows = [[], [], []]
+    zones.forEach((zone, index) => {
+      rows[index % 3].push(zone)
+    })
+    return rows
+  }
+
+  const [row1, row2, row3] = getZoneRows()
+
   const features = [
     {
       icon: <StoreIcon sx={{ fontSize: 32 }} />,
       title: 'Para Restaurantes',
       description: 'Solicita servicios de delivery cuando los necesites. Sin costos fijos mensuales.',
-      color: 'primary', // Naranja
+      color: 'primary',
       benefits: [
         'Solicita repartidores bajo demanda',
         'Paga solo por servicio realizado',
@@ -89,7 +166,7 @@ export default function Landing() {
       icon: <BikeIcon sx={{ fontSize: 32 }} />,
       title: 'Para Repartidores',
       description: 'Trabaja cuando quieras, gana por cada entrega. Flexibilidad total.',
-      color: 'success', // Verde
+      color: 'success',
       benefits: [
         'Horario flexible (online/offline)',
         'Recibe notificaciones instantáneas',
@@ -111,17 +188,14 @@ export default function Landing() {
     }
   ]
 
-  // Función para obtener el color del icono según el tipo
   const getFeatureColor = (colorType) => {
     switch (colorType) {
       case 'primary':
-        // Naranja para Restaurantes
         return {
           bg: 'linear-gradient(135deg, #FF6B35 0%, #FF8C5A 100%)',
           shadow: '0 4px 12px rgba(255, 107, 53, 0.4)'
         }
       case 'success':
-        // Verde para Repartidores
         return {
           bg: RIDERY_COLORS.gradientPrimary,
           shadow: RIDERY_COLORS.shadowGreen
@@ -135,7 +209,6 @@ export default function Landing() {
     }
   }
 
-  // Año actual dinámico
   const currentYear = new Date().getFullYear()
 
   return (
@@ -164,7 +237,6 @@ export default function Landing() {
                 boxShadow: '0 4px 12px rgba(0, 200, 83, 0.4)' 
               }}
             />
-            {/* Nombre ON Delivery SIEMPRE visible */}
             <Typography
               variant={isMobile ? 'subtitle1' : 'h6'}
               fontWeight="bold"
@@ -184,7 +256,6 @@ export default function Landing() {
               {mode === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
             </IconButton>
             
-            {/* En móvil solo iconos, en desktop texto completo */}
             {isMobile ? (
               <>
                 <IconButton
@@ -408,70 +479,59 @@ export default function Landing() {
         </Container>
       </Box>
 
-      {/* Coverage Section */}
+      {/* Coverage Section - ZONAS EN 3 FILAS CON SCROLL */}
       <Box sx={{ py: 8, bgcolor: 'background.default' }}>
-        <Container maxWidth="lg">
+        <Container maxWidth="xl">
           <Box sx={{ textAlign: 'center', mb: 6 }}>
             <Typography variant="h3" fontWeight="bold" gutterBottom color="text.primary" sx={{ fontSize: { xs: '1.75rem', md: '3rem' } }}>
               Cobertura en Maracay
             </Typography>
             <Typography variant="body1" color="text.secondary">
-              Zonas disponibles para entrega y sus tarifas
+              {zones.length} zonas disponibles para entrega
             </Typography>
           </Box>
 
           {loading ? (
-            <Grid container spacing={2} justifyContent="center">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <Grid item xs={6} sm={4} md={2.4} key={i}>
-                  <Skeleton variant="rectangular" height={100} sx={{ borderRadius: 2 }} />
-                </Grid>
+            <Stack spacing={2}>
+              {[1, 2, 3].map((row) => (
+                <Box key={row} sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} variant="rectangular" width={140} height={80} sx={{ borderRadius: 2 }} />
+                  ))}
+                </Box>
               ))}
-            </Grid>
+            </Stack>
+          ) : zones.length > 0 ? (
+            <Stack spacing={2}>
+              {/* Fila 1 - Scroll izquierda - MÁS LENTO */}
+              <ZoneScroller zones={row1} direction="left" speed={80} />
+              
+              {/* Fila 2 - Scroll derecha - MÁS LENTO */}
+              <ZoneScroller zones={row2} direction="right" speed={90} />
+              
+              {/* Fila 3 - Scroll izquierda - MÁS LENTO */}
+              <ZoneScroller zones={row3} direction="left" speed={70} />
+            </Stack>
           ) : (
-            <Grid container spacing={2} justifyContent="center">
-              {zones.slice(0, 10).map((zone) => (
-                <Grid item xs={6} sm={4} md={2.4} key={zone.id}>
-                  <Card
-                    elevation={0}
-                    sx={{
-                      textAlign: 'center',
-                      p: 2,
-                      border: 1,
-                      borderColor: 'divider',
-                      borderRadius: 2,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      '&:hover': {
-                        borderColor: RIDERY_COLORS.primary,
-                        bgcolor: 'rgba(0, 200, 83, 0.08)',
-                        transform: 'scale(1.02)'
-                      }
-                    }}
-                  >
-                    <LocationIcon sx={{ color: RIDERY_COLORS.primary, mb: 1 }} />
-                    <Typography variant="subtitle2" fontWeight="bold" color="text.primary">
-                      {zone.name}
-                    </Typography>
-                    <Chip
-                      label={formatCurrency(zone.price)}
-                      size="small"
-                      sx={{ 
-                        mt: 1,
-                        background: RIDERY_COLORS.gradientPrimary,
-                        color: 'white',
-                        fontWeight: 600
-                      }}
-                    />
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography variant="body1" color="text.secondary">
+                No hay zonas disponibles
+              </Typography>
+            </Box>
           )}
+
+          {/* Indicador de pausa */}
+          <Typography 
+            variant="caption" 
+            color="text.disabled" 
+            sx={{ display: 'block', textAlign: 'center', mt: 2 }}
+          >
+            * Pasa el cursor sobre una zona para pausar
+          </Typography>
         </Container>
       </Box>
 
-      {/* CTA Section - Botón con mejor contraste */}
+      {/* CTA Section */}
       <Box
         sx={{
           py: 10,
@@ -550,10 +610,9 @@ export default function Landing() {
               </Typography>
             </Box>
             <Typography variant="body2" color="grey.400" sx={{ mb: 2 }}>
-              Plataforma de delivery multiempresa para Maracay, Venezuela
+              Plataforma de delivery multiempresa 
             </Typography>
             
-            {/* Footer con año dinámico y desarrollador - Dos líneas en móvil */}
             <Box sx={{ 
               display: 'flex', 
               flexDirection: { xs: 'column', sm: 'row' },

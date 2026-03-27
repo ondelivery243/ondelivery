@@ -28,7 +28,9 @@ import {
   Grid,
   Paper,
   Divider,
-  Stack
+  Stack,
+  useTheme,
+  useMediaQuery
 } from '@mui/material'
 import {
   Search as SearchIcon,
@@ -45,8 +47,7 @@ import {
   Check as CheckIcon,
   Cancel as CancelIcon,
   Schedule as PendingIcon,
-  LocalShipping as ShippingIcon,
-  AttachMoney as MoneyIcon
+  LocalShipping as ShippingIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { subscribeToServices, subscribeToRestaurants, subscribeToDrivers } from '../../services/firestore'
@@ -63,6 +64,8 @@ const STATUS_CONFIG = {
 
 export default function AdminHistorial() {
   const { enqueueSnackbar } = useSnackbar()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   
   // Data
   const [services, setServices] = useState([])
@@ -146,20 +149,16 @@ export default function AdminHistorial() {
     }
   }
   
-  // Formato de moneda sin "RD" duplicado
+  // Formato de moneda manual - SIEMPRE muestra $5.00
   const formatCurrency = (amount) => {
     if (amount === undefined || amount === null || isNaN(amount)) return '$0.00'
-    return new Intl.NumberFormat('es-DO', {
-      style: 'currency',
-      currency: 'DOP',
-      minimumFractionDigits: 2
-    }).format(amount).replace('RD$', '$')
+    const num = Number(amount)
+    return '$' + num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   }
   
   // Filtered services
   const filteredServices = useMemo(() => {
     return services.filter(service => {
-      // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
         const restaurantName = getRestaurantName(service.restaurantId)?.toLowerCase() || ''
@@ -206,7 +205,7 @@ export default function AdminHistorial() {
     })
   }, [services, searchQuery, statusFilter, restaurantFilter, driverFilter, dateFrom, dateTo])
   
-  // Stats - con ganancia de repartidor
+  // Stats
   const stats = useMemo(() => {
     const completed = filteredServices.filter(s => s.status === 'entregado')
     const totalDeliveryFees = filteredServices.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
@@ -283,7 +282,6 @@ export default function AdminHistorial() {
     enqueueSnackbar('Archivo CSV descargado', { variant: 'success' })
   }
   
-  // Paginated data
   const paginatedServices = filteredServices.slice(
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
@@ -312,7 +310,7 @@ export default function AdminHistorial() {
         </Button>
       </Box>
       
-      {/* Quick Stats - 4 tarjetas */}
+      {/* Quick Stats */}
       <Grid container spacing={2}>
         <Grid item xs={6} sm={3}>
           <Card elevation={0} sx={{ bgcolor: 'grey.100', height: '100%' }}>
@@ -364,7 +362,7 @@ export default function AdminHistorial() {
         </Grid>
       </Grid>
       
-      {/* Filters - distribuidos en filas completas */}
+      {/* Filters */}
       <Card elevation={0}>
         <CardContent sx={{ py: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
@@ -374,7 +372,6 @@ export default function AdminHistorial() {
             </Typography>
           </Box>
           
-          {/* Fila 1: Búsqueda completa */}
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12}>
               <TextField
@@ -394,7 +391,6 @@ export default function AdminHistorial() {
             </Grid>
           </Grid>
           
-          {/* Fila 2: Filtros desplegables */}
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
@@ -446,7 +442,6 @@ export default function AdminHistorial() {
             </Grid>
           </Grid>
           
-          {/* Fila 3: Fechas y botón limpiar */}
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={6} sm={3}>
               <TextField
@@ -599,10 +594,11 @@ export default function AdminHistorial() {
         />
       </Card>
       
-      {/* Detail Modal */}
+      {/* Detail Modal - PANTALLA COMPLETA EN MÓVIL */}
       <Dialog
         open={detailModalOpen}
         onClose={handleCloseDetail}
+        fullScreen={isMobile}
         maxWidth="sm"
         fullWidth
       >
@@ -642,17 +638,17 @@ export default function AdminHistorial() {
                 />
               </Box>
               
-              {/* Info Grid - 2x2 bien alineado */}
+              {/* Info Grid - UNA COLUMNA EN MÓVIL */}
               <Grid container spacing={2} sx={{ mb: 3 }}>
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <TimeIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Fecha y Hora
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium">
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {formatDateTime(selectedService.createdAt)}
                         </Typography>
                       </Box>
@@ -660,15 +656,15 @@ export default function AdminHistorial() {
                   </Paper>
                 </Grid>
                 
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <RestaurantIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Restaurante
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium" noWrap>
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {getRestaurantName(selectedService.restaurantId)}
                         </Typography>
                       </Box>
@@ -676,15 +672,15 @@ export default function AdminHistorial() {
                   </Paper>
                 </Grid>
                 
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <BikeIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Repartidor
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium" noWrap>
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {getDriverName(selectedService.driverId)}
                         </Typography>
                       </Box>
@@ -692,15 +688,15 @@ export default function AdminHistorial() {
                   </Paper>
                 </Grid>
                 
-                <Grid item xs={6}>
+                <Grid item xs={12} sm={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
                       <PersonIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
-                      <Box sx={{ flex: 1 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
                           Cliente
                         </Typography>
-                        <Typography variant="body1" fontWeight="medium" noWrap>
+                        <Typography variant="body1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
                           {selectedService.clientName || 'No especificado'}
                         </Typography>
                       </Box>
@@ -715,24 +711,21 @@ export default function AdminHistorial() {
               </Typography>
               <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: 'grey.50' }}>
                 <Stack spacing={1.5}>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <PersonIcon fontSize="small" color="action" />
+                  <Box>
                     <Typography variant="body2">
                       <strong>Nombre:</strong> {selectedService.clientName || 'No especificado'}
                     </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <PhoneIcon fontSize="small" color="action" />
+                  </Box>
+                  <Box>
                     <Typography variant="body2">
                       <strong>Teléfono:</strong> {selectedService.clientPhone || 'No especificado'}
                     </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={1} alignItems="flex-start">
-                    <LocationIcon fontSize="small" color="action" sx={{ mt: 0.3 }} />
-                    <Typography variant="body2">
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
                       <strong>Dirección:</strong> {selectedService.deliveryAddress || 'No especificada'}
                     </Typography>
-                  </Stack>
+                  </Box>
                 </Stack>
               </Paper>
               
@@ -757,7 +750,7 @@ export default function AdminHistorial() {
                     Notas
                   </Typography>
                   <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                    <Typography variant="body2">
+                    <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
                       {selectedService.notes}
                     </Typography>
                   </Paper>
@@ -840,7 +833,7 @@ export default function AdminHistorial() {
             <Divider />
             
             <DialogActions sx={{ px: 3, py: 2 }}>
-              <Button onClick={handleCloseDetail} variant="contained">
+              <Button onClick={handleCloseDetail} variant="contained" fullWidth={isMobile}>
                 Cerrar
               </Button>
             </DialogActions>
