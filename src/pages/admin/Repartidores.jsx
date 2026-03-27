@@ -1,5 +1,5 @@
 // src/pages/admin/Repartidores.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Box,
   Card,
@@ -31,7 +31,8 @@ import {
   Menu,
   MenuItem,
   Paper,
-  Divider
+  Divider,
+  CircularProgress
 } from '@mui/material'
 import {
   Search as SearchIcon,
@@ -44,12 +45,14 @@ import {
   CheckCircle as CheckIcon,
   Cancel as CancelIcon,
   Star as StarIcon,
-  PowerSettingsNew as PowerIcon
+  PowerSettingsNew as PowerIcon,
+  Build as BuildIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { formatCurrency, formatDate } from '../../store/useStore'
 import { 
   subscribeToDrivers, 
+  subscribeToServices,
   addDriver, 
   updateDriver,
   toggleDriverActive,
@@ -64,8 +67,16 @@ export default function AdminRepartidores() {
   const { enqueueSnackbar } = useSnackbar()
   const currentYear = new Date().getFullYear()
   
+  // ============================================================
+  // 👇 MODIFICA ESTA LÍNEA PARA MOSTRAR U OCULTAR EL BOTÓN
+  // Cambia a 'false' para ocultar el botón de reparar contadores
+  const mostrarBotonReparar = false 
+  // ============================================================
+  
   const [drivers, setDrivers] = useState([])
+  const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
+  const [repairing, setRepairing] = useState(false)
   
   const [searchTerm, setSearchTerm] = useState('')
   const [page, setPage] = useState(0)
@@ -88,31 +99,118 @@ export default function AdminRepartidores() {
     active: true
   })
 
-  // Cargar datos
+  // ============================================
+  // SUSCRIPCIONES EN TIEMPO REAL
+  // ============================================
   useEffect(() => {
     setLoading(true)
-    const unsubscribe = subscribeToDrivers((data) => {
+    
+    const unsubDrivers = subscribeToDrivers((data) => {
       setDrivers(data)
+    })
+    
+    const unsubServices = subscribeToServices((data) => {
+      setServices(data)
       setLoading(false)
     })
-    return () => unsubscribe()
+    
+    return () => {
+      unsubDrivers()
+      unsubServices()
+    }
   }, [])
 
-  // Filtrar repartidores
-  const filteredDrivers = drivers.filter(driver => {
-    return !searchTerm || 
-      driver.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      driver.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  // ============================================
+  // CALCULAR SERVICIOS POR REPARTIDOR (TIEMPO REAL)
+  // ============================================
+  const driverServicesMap = useMemo(() => {
+    const map = {}
+    
+    // Solo contar servicios completados
+    services
+      .filter(s => s.status === 'entregado' && s.driverId)
+      .forEach(service => {
+        if (!map[service.driverId]) {
+          map[service.driverId] = {
+            totalServices: 0,
+            totalEarnings: 0
+          }
+        }
+        map[service.driverId].totalServices += 1
+        map[service.driverId].totalEarnings += service.driverEarnings || 0
+      })
+    
+    return map
+  }, [services])
+
+  // ============================================
+  // ESTADÍSTICAS CALCULADAS (TIEMPO REAL)
+  // ============================================
+  const stats = useMemo(() => {
+    const totalServicesReal = Object.values(driverServicesMap).reduce(
+      (sum, stats) => sum + stats.totalServices, 0
+    )
+    
+    return {
+      total: drivers.length,
+      online: drivers.filter(d => d.isOnline && d.active).length,
+      active: drivers.filter(d => d.active).length,
+      totalServices: totalServicesReal
+    }
+  }, [drivers, driverServicesMap])
+
+  // ============================================
+  // FILTRADO (OPTIMIZADO)
+  // ============================================
+  const filteredDrivers = useMemo(() => {
+    if (!searchTerm) return drivers
+    
+    const term = searchTerm.toLowerCase()
+    return drivers.filter(driver => 
+      driver.name?.toLowerCase().includes(term) ||
+      driver.email?.toLowerCase().includes(term) ||
       driver.phone?.includes(searchTerm) ||
-      driver.vehiclePlate?.toLowerCase().includes(searchTerm.toLowerCase())
-  })
+      driver.vehiclePlate?.toLowerCase().includes(term)
+    )
+  }, [drivers, searchTerm])
 
-  // Paginación
-  const paginatedDrivers = filteredDrivers.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
-  )
+  // ============================================
+  // PAGINACIÓN (OPTIMIZADO)
+  // ============================================
+  const paginatedDrivers = useMemo(() => {
+    return filteredDrivers.slice(
+      page * rowsPerPage,
+      page * rowsPerPage + rowsPerPage
+    )
+  }, [filteredDrivers, page, rowsPerPage])
 
+  // ============================================
+  // FUNCIÓN DE REPARACIÓN
+  // ============================================
+  const handleRepairStats = async () => {
+    setRepairing(true)
+    try {
+      const response = await fetch('/.netlify/functions/repairDriverStats', { method: 'POST' })
+      const data = await response.json()
+      
+      if (data.success) {
+        enqueueSnackbar(
+          `Reparación completada: ${data.driversUpdated} repartidores actualizados`,
+          { variant: 'success' }
+        )
+      } else {
+        enqueueSnackbar('Error: ' + data.error, { variant: 'error' })
+      }
+    } catch (error) {
+      enqueueSnackbar('Error al reparar estadísticas', { variant: 'error' })
+    }
+    setRepairing(false)
+  }
+
+  // ============================================
+  // HANDLERS
+  // ============================================
+  
   // Abrir diálogo de edición
   const handleOpenEdit = (driver = null) => {
     if (driver) {
@@ -226,6 +324,12 @@ export default function AdminRepartidores() {
     setSelectedDriver(null)
   }
 
+  // Resetear página cuando cambia el filtro
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value)
+    setPage(0)
+  }
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Header */}
@@ -243,6 +347,20 @@ export default function AdminRepartidores() {
             Gestiona el equipo de repartidores (se registran por sí mismos)
           </Typography>
         </Box>
+        
+        {/* Botón de reparación (Condicional) */}
+        {mostrarBotonReparar && (
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={repairing ? <CircularProgress size={16} /> : <BuildIcon />}
+            onClick={handleRepairStats}
+            disabled={repairing}
+            color="warning"
+          >
+            {repairing ? 'Reparando...' : 'Reparar contadores'}
+          </Button>
+        )}
       </Stack>
 
       {/* Stats Cards */}
@@ -251,7 +369,7 @@ export default function AdminRepartidores() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="primary">
-                {drivers.length}
+                {stats.total}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Total
@@ -263,7 +381,7 @@ export default function AdminRepartidores() {
           <Card sx={{ borderRadius: 2, bgcolor: 'success.light' }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="success.dark">
-                {drivers.filter(d => d.isOnline && d.active).length}
+                {stats.online}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Online
@@ -275,7 +393,7 @@ export default function AdminRepartidores() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="success.main">
-                {drivers.filter(d => d.active).length}
+                {stats.active}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Activos
@@ -287,7 +405,7 @@ export default function AdminRepartidores() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="warning.main">
-                {drivers.filter(d => d.totalServices > 0).reduce((sum, d) => sum + (d.totalServices || 0), 0)}
+                {stats.totalServices}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Servicios totales
@@ -303,7 +421,7 @@ export default function AdminRepartidores() {
         size="small"
         placeholder="Buscar por nombre, teléfono o placa..."
         value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
+        onChange={handleSearchChange}
         InputProps={{
           startAdornment: (
             <InputAdornment position="start">
@@ -328,7 +446,15 @@ export default function AdminRepartidores() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {paginatedDrivers.length === 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Cargando...
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedDrivers.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                     <BikeIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
@@ -338,92 +464,97 @@ export default function AdminRepartidores() {
                   </TableCell>
                 </TableRow>
               ) : (
-                paginatedDrivers.map((driver) => (
-                  <TableRow key={driver.id} hover>
-                    <TableCell>
-                      <Stack direction="row" spacing={1.5} alignItems="center">
-                        <Avatar
-                          sx={{
-                            bgcolor: driver.isOnline 
-                              ? 'success.main' 
-                              : driver.active 
-                                ? 'primary.main' 
-                                : 'grey.400',
-                            width: 40,
-                            height: 40
-                          }}
-                        >
-                          {driver.name?.charAt(0)?.toUpperCase() || 'R'}
-                        </Avatar>
-                        <Box>
-                          <Typography variant="body2" fontWeight="medium">
-                            {driver.name}
-                          </Typography>
-                          {!isMobile && (
-                            <Typography variant="caption" color="text.secondary">
-                              {driver.totalServices || 0} servicios
+                paginatedDrivers.map((driver) => {
+                  // Servicios REALES desde la colección services
+                  const realServices = driverServicesMap[driver.id]?.totalServices || 0
+                  
+                  return (
+                    <TableRow key={driver.id} hover>
+                      <TableCell>
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <Avatar
+                            sx={{
+                              bgcolor: driver.isOnline 
+                                ? 'success.main' 
+                                : driver.active 
+                                  ? 'primary.main' 
+                                  : 'grey.400',
+                              width: 40,
+                              height: 40
+                            }}
+                          >
+                            {driver.name?.charAt(0)?.toUpperCase() || 'R'}
+                          </Avatar>
+                          <Box>
+                            <Typography variant="body2" fontWeight="medium">
+                              {driver.name}
                             </Typography>
-                          )}
-                        </Box>
-                      </Stack>
-                    </TableCell>
-                    {!isMobile && (
-                      <TableCell>
-                        <Box>
-                          <Typography variant="body2">
-                            {driver.vehicleType === 'motocicleta' ? '🏍️' : '🚗'} {driver.vehicleBrand} {driver.vehicleModel}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {driver.vehiclePlate || '-'}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                    )}
-                    <TableCell>
-                      <Typography variant="body2">
-                        {driver.phone || '-'}
-                      </Typography>
-                    </TableCell>
-                    {!isMobile && (
-                      <TableCell>
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <StarIcon sx={{ fontSize: 16, color: 'warning.main' }} />
-                          <Typography variant="body2" fontWeight="medium">
-                            {driver.rating?.toFixed(1) || '5.0'}
-                          </Typography>
+                            {!isMobile && (
+                              <Typography variant="caption" color="text.secondary">
+                                {realServices} servicios
+                              </Typography>
+                            )}
+                          </Box>
                         </Stack>
                       </TableCell>
-                    )}
-                    <TableCell>
-                      <Stack direction="row" spacing={0.5}>
-                        <Chip
-                          icon={driver.isOnline ? <PowerIcon /> : <CancelIcon />}
-                          label={driver.isOnline ? 'Online' : 'Offline'}
-                          color={driver.isOnline ? 'success' : 'default'}
+                      {!isMobile && (
+                        <TableCell>
+                          <Box>
+                            <Typography variant="body2">
+                              {driver.vehicleType === 'motocicleta' ? '🏍️' : '🚗'} {driver.vehicleBrand} {driver.vehicleModel}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {driver.vehiclePlate || '-'}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                      )}
+                      <TableCell>
+                        <Typography variant="body2">
+                          {driver.phone || '-'}
+                        </Typography>
+                      </TableCell>
+                      {!isMobile && (
+                        <TableCell>
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <StarIcon sx={{ fontSize: 16, color: 'warning.main' }} />
+                            <Typography variant="body2" fontWeight="medium">
+                              {driver.rating?.toFixed(1) || '5.0'}
+                            </Typography>
+                          </Stack>
+                        </TableCell>
+                      )}
+                      <TableCell>
+                        <Stack direction="row" spacing={0.5}>
+                          <Chip
+                            icon={driver.isOnline ? <PowerIcon /> : <CancelIcon />}
+                            label={driver.isOnline ? 'Online' : 'Offline'}
+                            color={driver.isOnline ? 'success' : 'default'}
+                            size="small"
+                            variant="outlined"
+                          />
+                          <Chip
+                            icon={driver.active ? <CheckIcon /> : <CancelIcon />}
+                            label={driver.active ? 'Activo' : 'Inactivo'}
+                            color={driver.active ? 'primary' : 'default'}
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleToggleActive(driver)}
+                            clickable
+                          />
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton
                           size="small"
-                          variant="outlined"
-                        />
-                        <Chip
-                          icon={driver.active ? <CheckIcon /> : <CancelIcon />}
-                          label={driver.active ? 'Activo' : 'Inactivo'}
-                          color={driver.active ? 'primary' : 'default'}
-                          size="small"
-                          variant="outlined"
-                          onClick={() => handleToggleActive(driver)}
-                          clickable
-                        />
-                      </Stack>
-                    </TableCell>
-                    <TableCell align="right">
-                      <IconButton
-                        size="small"
-                        onClick={(e) => handleMenuOpen(e, driver)}
-                      >
-                        <MoreIcon />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
+                          onClick={(e) => handleMenuOpen(e, driver)}
+                        >
+                          <MoreIcon />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
               )}
             </TableBody>
           </Table>
@@ -454,7 +585,7 @@ export default function AdminRepartidores() {
           <EditIcon sx={{ mr: 1, fontSize: 20 }} />
           Editar
         </MenuItem>
-        <MenuItem onClick={() => handleToggleOnline(selectedDriver)}>
+        <MenuItem onClick={() => { handleToggleOnline(selectedDriver); handleMenuClose(); }}>
           {selectedDriver?.isOnline ? (
             <>
               <CancelIcon sx={{ mr: 1, fontSize: 20 }} />
@@ -467,7 +598,7 @@ export default function AdminRepartidores() {
             </>
           )}
         </MenuItem>
-        <MenuItem onClick={() => handleToggleActive(selectedDriver)}>
+        <MenuItem onClick={() => { handleToggleActive(selectedDriver); handleMenuClose(); }}>
           {selectedDriver?.active ? (
             <>
               <CancelIcon sx={{ mr: 1, fontSize: 20 }} />

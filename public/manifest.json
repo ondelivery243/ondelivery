@@ -2,7 +2,7 @@
   "name": "ON Delivery - Maracay",
   "short_name": "ON Delivery",
   "description": "Plataforma de delivery multiempresa para Maracay, Venezuela. Conectamos restaurantes con repartidores confiables.",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "theme_color": "#FF6B35",
   "background_color": "#FFFFFF",
   "display": "standalone",

@@ -1,11 +1,12 @@
 // src/pages/restaurante/Dashboard.jsx
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { alpha } from '@mui/material/styles'
 import {
   Box, Card, CardContent, Typography, Button, TextField, Grid, Chip, Stack,
   Select, MenuItem, FormControl, InputAdornment, Dialog, DialogTitle, DialogContent,
   DialogActions, useTheme, useMediaQuery, Paper, LinearProgress, Collapse,
-  IconButton, Tooltip, Tab, Tabs, Badge, Alert
+  IconButton, Tooltip, Tab, Tabs, Badge, Alert, Table, TableBody, TableCell,
+  TableContainer, TableHead, TableRow, Skeleton
 } from '@mui/material'
 import {
   Add as AddIcon, TwoWheeler as DeliveryIcon, LocationOn as LocationIcon,
@@ -13,7 +14,9 @@ import {
   CheckCircle as CheckIcon, AccessTime as ClockIcon, Cancel as CancelIcon,
   ExpandMore as ExpandIcon, ExpandLess as CollapseIcon, Refresh as RefreshIcon,
   AttachMoney as MoneyIcon, Chat as ChatIcon, Star as StarIcon, Map as MapIcon,
-  List as ListIcon, Notifications as NotificationIcon, CalendarToday as CalendarIcon
+  List as ListIcon, Notifications as NotificationIcon, CalendarToday as CalendarIcon,
+  Today as TodayIcon, DateRange as WeekIcon, CalendarMonth as MonthIcon,
+  TrendingUp as TrendingUpIcon, ArrowForward as ArrowIcon, Update as UpdateIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { formatCurrency, formatTime, formatDate, useRestaurantStore, useStore } from '../../store/useStore'
@@ -30,6 +33,51 @@ import VersionFooter from '../../components/common/VersionFooter'
 
 function TabPanel({ value, index, children }) {
   return value === index ? <Box sx={{ pt: 2 }}>{children}</Box> : null
+}
+
+// ============================================
+// FUNCIONES AUXILIARES PARA PERÍODOS
+// ============================================
+
+/**
+ * Obtiene el inicio del día actual (00:00:00)
+ */
+const getStartOfDay = () => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return today
+}
+
+/**
+ * Obtiene el inicio de la semana actual (Lunes 00:00:00)
+ */
+const getStartOfWeek = () => {
+  const now = new Date()
+  const dayOfWeek = now.getDay()
+  const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const weekStart = new Date(now)
+  weekStart.setDate(now.getDate() - diff)
+  weekStart.setHours(0, 0, 0, 0)
+  return weekStart
+}
+
+/**
+ * Obtiene el inicio del mes actual (día 1, 00:00:00)
+ */
+const getStartOfMonth = () => {
+  const monthStart = new Date()
+  monthStart.setDate(1)
+  monthStart.setHours(0, 0, 0, 0)
+  return monthStart
+}
+
+/**
+ * Verifica si una fecha está dentro de un período
+ */
+const isWithinPeriod = (timestamp, startDate) => {
+  if (!timestamp) return false
+  const date = timestamp?.toDate?.() || timestamp
+  return date >= startDate
 }
 
 // ==================== FUNCIONES DE MANEJO SEMANAL ====================
@@ -55,30 +103,12 @@ const formatWeekRange = () => {
   const monday = getMonday(new Date())
   const sunday = getSunday(new Date())
   const options = { day: 'numeric', month: 'short' }
-  return `${monday.toLocaleDateString('es-EC', options)} - ${sunday.toLocaleDateString('es-EC', options)}`
-}
-
-const getCurrentWeekMonday = () => {
-  const today = new Date()
-  const day = today.getDay()
-  const diff = today.getDate() - day + (day === 0 ? -6 : 1)
-  const monday = new Date(today.setDate(diff))
-  monday.setHours(0, 0, 0, 0)
-  return monday
-}
-
-const isInCurrentWeek = (date) => {
-  if (!date) return false
-  const monday = getCurrentWeekMonday()
-  const sunday = new Date(monday)
-  sunday.setDate(sunday.getDate() + 6)
-  sunday.setHours(23, 59, 59, 999)
-  return date >= monday && date <= sunday
+  return `${monday.toLocaleDateString('es-VE', options)} - ${sunday.toLocaleDateString('es-VE', options)}`
 }
 // ====================================================================
 
 // ============================================
-// 🔊 SISTEMA DE SONIDOS - PERSISTENTE EN WINDOW (FIXED)
+// 🔊 SISTEMA DE SONIDOS
 // ============================================
 const getAudioInstance = () => {
   if (typeof window !== 'undefined') {
@@ -131,14 +161,13 @@ const playChatMessageSound = async () => {
     gain.connect(ctx.destination)
     osc.start(now)
     osc.stop(now + 0.25)
-    console.log('✅ [Sonido] Sonido CHAT ejecutado en hardware');
   } catch (e) {
     console.log('❌ Error sonido chat:', e.message)
   }
 }
 
 const initAudioOnFirstInteraction = async () => {
-  await initAudioContext();
+  await initAudioContext()
   document.removeEventListener('click', initAudioOnFirstInteraction)
   document.removeEventListener('touchstart', initAudioOnFirstInteraction)
   document.removeEventListener('keydown', initAudioOnFirstInteraction)
@@ -172,8 +201,8 @@ export default function RestauranteDashboard() {
   const [chatUnreadCounts, setChatUnreadCounts] = useState({})
   const [showChatAlert, setShowChatAlert] = useState(false)
   const [lastChatMessage, setLastChatMessage] = useState(null)
+  const [statsTab, setStatsTab] = useState(0)
   
-  // ✅ Estado para forzar el pulso visual
   const [forceShowPulse, setForceShowPulse] = useState(false)
   
   const chatUnsubscribers = useRef([])
@@ -188,8 +217,16 @@ export default function RestauranteDashboard() {
   
   const [nuevoServicio, setNuevoServicio] = useState({
     zona: '', direccion: '', cliente: '', telefono: '',
-    metodoPago: 'efectivo', montoCobrar: '', notas: ''
+    metodoPago: 'efectivo', montoCobrar: '', pagaCon: '', notas: ''
   })
+
+  // Calcular cambio
+  const cambioCalculado = useMemo(() => {
+    if (nuevoServicio.metodoPago !== 'efectivo') return 0
+    const monto = parseFloat(nuevoServicio.montoCobrar) || 0
+    const paga = parseFloat(nuevoServicio.pagaCon) || 0
+    return paga > monto ? paga - monto : 0
+  }, [nuevoServicio.metodoPago, nuevoServicio.montoCobrar, nuevoServicio.pagaCon])
 
   // Cargar configuración
   useEffect(() => {
@@ -241,7 +278,7 @@ export default function RestauranteDashboard() {
     loadData()
   }, [restaurantData, setRestaurantData, user])
 
-  // ✅ SUSCRIPCIÓN A CHAT - FIX: SONIDO EN AMBOS ESTADOS Y SINCRONIZACIÓN DE ALERTA
+  // SUSCRIPCIÓN A CHAT
   useEffect(() => {
     chatUnsubscribers.current.forEach(unsub => unsub())
     chatUnsubscribers.current = []
@@ -260,33 +297,22 @@ export default function RestauranteDashboard() {
           const lastMessageTime = room.lastMessageAt || 0
           const lastSender = room.lastMessageBy
           
-          // 1. Actualizar contadores
           setChatUnreadCounts(prev => ({ ...prev, [serviceId]: unreadCount }))
           
-          // 2. Detectar NUEVO mensaje (por timestamp)
           const prevTime = lastMessageTimesRef.current[serviceId] || 0
           const isNewMessage = lastMessageTime > prevTime
           const isFromOther = lastSender !== 'restaurant'
           
-          // Actualizar timestamp
           lastMessageTimesRef.current[serviceId] = lastMessageTime
           
-          // 3. Lógica de Alerta
           if (isNewMessage && isFromOther && wasAlreadyTracked) {
-            // A. SONIDO: REPRODUCIR SIEMPRE (abierto o cerrado)
-            console.log(`🔔 [Restaurante] Nuevo mensaje. Chat Abierto: ${chatOpenRef.current}`);
             playChatMessageSound()
             
-            // B. ALERTAS VISUALES: Solo si el chat está CERRADO
             if (!chatOpenRef.current) {
-              console.log('🔴 [Restaurante] Chat cerrado -> Activando pulso visual');
-              // Pulso del FAB
               setForceShowPulse(true)
               
-              // Vibración
               if (navigator.vibrate) navigator.vibrate([200, 100, 200])
               
-              // Alerta flotante
               setLastChatMessage({
                 serviceName: service.driverName || service.zoneName,
                 message: room.lastMessage,
@@ -294,7 +320,6 @@ export default function RestauranteDashboard() {
               })
               setShowChatAlert(true)
               
-              // Notificación Nativa
               if (Notification.permission === 'granted') {
                 try {
                   new Notification('💬 Nuevo mensaje', {
@@ -303,18 +328,13 @@ export default function RestauranteDashboard() {
                   })
                 } catch (e) {}
               }
-            } else {
-               console.log('👁️ [Restaurante] Chat abierto -> Solo sonido, sin alertas visuales');
             }
           }
           
-          // 4. ✅ SINCRONIZAR LECTURA: Si el contador baja a 0, quitar alerta visual
           if (unreadCount === 0) {
-            console.log('👀 [Restaurante] Mensaje leído (contador 0) -> Quitando pulso visual');
             setForceShowPulse(false)
           }
           
-          // Marcar como rastreado
           if (!wasAlreadyTracked) {
              servicesTrackedRef.current.add(serviceId)
           }
@@ -333,39 +353,102 @@ export default function RestauranteDashboard() {
 
   const totalUnread = Object.values(chatUnreadCounts).reduce((sum, count) => sum + count, 0)
 
-  // ==================== ESTADÍSTICAS SEMANALES ====================
-  const getWeekServices = () => {
-    return services.filter(s => {
-      const createdAt = s.createdAt?.toDate?.()
-      return createdAt && isInCurrentWeek(createdAt)
-    }).length
-  }
+  // ============================================
+  // 📊 ESTADÍSTICAS CALCULADAS EN TIEMPO REAL
+  // ============================================
+  
+  const stats = useMemo(() => {
+    // Fechas de inicio de cada período
+    const startOfDay = getStartOfDay()
+    const startOfWeek = getStartOfWeek()
+    const startOfMonth = getStartOfMonth()
 
-  const getWeekTotal = () => {
-    return services
-      .filter(s => {
-        const createdAt = s.createdAt?.toDate?.()
-        return s.status === 'entregado' && createdAt && isInCurrentWeek(createdAt)
-      })
-      .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-  }
+    // Servicios por período
+    const servicesToday = services.filter(s => isWithinPeriod(s.createdAt, startOfDay))
+    const servicesThisWeek = services.filter(s => isWithinPeriod(s.createdAt, startOfWeek))
+    const servicesThisMonth = services.filter(s => isWithinPeriod(s.createdAt, startOfMonth))
 
-  const getTotalHistorico = () => {
-    return services
-      .filter(s => s.status === 'entregado')
-      .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-  }
+    // Servicios completados por período
+    const completedToday = servicesToday.filter(s => s.status === 'entregado')
+    const completedThisWeek = servicesThisWeek.filter(s => s.status === 'entregado')
+    const completedThisMonth = servicesThisMonth.filter(s => s.status === 'entregado')
 
-  const getPendingPayment = () => {
-    return services
-      .filter(s => {
-        if (s.status !== 'entregado') return false
-        const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
-        return !settledField
-      })
-      .reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-  }
-  // ==============================================================
+    // Por pagar (entregados y no liquidados) por período
+    const toPayToday = completedToday.filter(s => {
+      const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
+      return !settledField
+    }).reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+
+    const toPayThisWeek = completedThisWeek.filter(s => {
+      const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
+      return !settledField
+    }).reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+
+    const paidThisMonth = completedThisMonth.filter(s => {
+      const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
+      return settledField
+    }).reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+
+    // Total por pagar (todos los entregados no liquidados)
+    const totalToPay = services.filter(s => {
+      if (s.status !== 'entregado') return false
+      const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
+      return !settledField
+    }).reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+
+    // Conteos por estado
+    const pendingServices = services.filter(s => s.status === 'pendiente').length
+    const inProgressServices = services.filter(s => ['asignado', 'en_camino'].includes(s.status)).length
+
+    return {
+      // Diario
+      servicesToday: servicesToday.length,
+      completedToday: completedToday.length,
+      toPayToday,
+      
+      // Semanal
+      servicesThisWeek: servicesThisWeek.length,
+      completedThisWeek: completedThisWeek.length,
+      toPayThisWeek,
+      
+      // Mensual
+      servicesThisMonth: servicesThisMonth.length,
+      completedThisMonth: completedThisMonth.length,
+      paidThisMonth,
+      
+      // Estados actuales
+      pendingServices,
+      inProgressServices,
+      
+      // Total por pagar
+      totalToPay
+    }
+  }, [services])
+
+  // Tarjetas principales de estadísticas
+  const mainStatsCards = useMemo(() => [
+    { 
+      title: 'Servicios Hoy', 
+      value: stats.servicesToday, 
+      subtitle: `${stats.completedToday} completados`,
+      icon: PackageIcon, 
+      bgColor: '#3B82F6'
+    },
+    { 
+      title: 'Servicios Esta Semana', 
+      value: stats.servicesThisWeek, 
+      subtitle: `${stats.completedThisWeek} completados`,
+      icon: WeekIcon, 
+      bgColor: '#8B5CF6'
+    },
+    { 
+      title: 'Servicios Este Mes', 
+      value: stats.servicesThisMonth, 
+      subtitle: `${stats.completedThisMonth} completados`,
+      icon: MonthIcon, 
+      bgColor: '#10B981'
+    },
+  ], [stats])
 
   // Detectar servicios para calificar
   useEffect(() => {
@@ -466,6 +549,21 @@ export default function RestauranteDashboard() {
       enqueueSnackbar('Error: No se encontraron datos del restaurante', { variant: 'error' })
       return
     }
+    
+    if (nuevoServicio.metodoPago === 'efectivo') {
+      if (!nuevoServicio.montoCobrar || parseFloat(nuevoServicio.montoCobrar) <= 0) {
+        enqueueSnackbar('Debes ingresar el monto a cobrar', { variant: 'warning' })
+        return
+      }
+      if (!nuevoServicio.pagaCon || parseFloat(nuevoServicio.pagaCon) <= 0) {
+        enqueueSnackbar('Debes ingresar con cuánto paga el cliente', { variant: 'warning' })
+        return
+      }
+      if (parseFloat(nuevoServicio.pagaCon) < parseFloat(nuevoServicio.montoCobrar)) {
+        enqueueSnackbar('El monto que paga el cliente no puede ser menor al monto a cobrar', { variant: 'warning' })
+        return
+      }
+    }
 
     setSaving(true)
     
@@ -474,6 +572,10 @@ export default function RestauranteDashboard() {
     const commissionRate = appSettings.commissionRate || 20
     const platformFee = deliveryFee * (commissionRate / 100)
     const driverEarnings = deliveryFee - platformFee
+    
+    const amountToCollect = nuevoServicio.metodoPago === 'pagado' ? 0 : parseFloat(nuevoServicio.montoCobrar) || 0
+    const paysWith = nuevoServicio.metodoPago === 'efectivo' ? parseFloat(nuevoServicio.pagaCon) || 0 : 0
+    const changeAmount = paysWith > amountToCollect ? paysWith - amountToCollect : 0
     
     const result = await createService({
       restaurantId: restaurantData.id,
@@ -485,7 +587,9 @@ export default function RestauranteDashboard() {
       clientName: nuevoServicio.cliente,
       clientPhone: nuevoServicio.telefono,
       paymentMethod: nuevoServicio.metodoPago,
-      amountToCollect: parseFloat(nuevoServicio.montoCobrar) || 0,
+      amountToCollect,
+      paysWith,
+      changeAmount,
       notes: nuevoServicio.notas,
       deliveryFee, commissionRate, platformFee, driverEarnings,
       settledRestaurant: false,
@@ -497,7 +601,7 @@ export default function RestauranteDashboard() {
     if (result.success) {
       enqueueSnackbar(`Servicio ${result.serviceId} creado. Costo: ${formatCurrency(deliveryFee)}`, { variant: 'success' })
       setOpenDialog(false)
-      setNuevoServicio({ zona: '', direccion: '', cliente: '', telefono: '', metodoPago: 'efectivo', montoCobrar: '', notas: '' })
+      setNuevoServicio({ zona: '', direccion: '', cliente: '', telefono: '', metodoPago: 'efectivo', montoCobrar: '', pagaCon: '', notas: '' })
     } else {
       enqueueSnackbar(result.error || 'Error al crear servicio', { variant: 'error' })
     }
@@ -505,12 +609,12 @@ export default function RestauranteDashboard() {
 
   const getStatusConfig = (status) => {
     const configs = {
-      pendiente: { color: 'warning', label: 'Pendiente', icon: <ClockIcon /> },
-      asignado: { color: 'info', label: 'Asignado', icon: <DeliveryIcon /> },
-      en_camino: { color: 'primary', label: 'En Camino', icon: <DeliveryIcon /> },
-      entregado: { color: 'success', label: 'Entregado', icon: <CheckIcon /> },
-      cancelado: { color: 'error', label: 'Cancelado', icon: <CancelIcon /> },
-      sin_repartidor: { color: 'error', label: 'Sin Repartidor', icon: <CancelIcon /> }
+      pendiente: { color: 'warning', label: 'Pendiente', icon: <ClockIcon sx={{ fontSize: 14 }} /> },
+      asignado: { color: 'info', label: 'Asignado', icon: <DeliveryIcon sx={{ fontSize: 14 }} /> },
+      en_camino: { color: 'primary', label: 'En Camino', icon: <DeliveryIcon sx={{ fontSize: 14 }} /> },
+      entregado: { color: 'success', label: 'Entregado', icon: <CheckIcon sx={{ fontSize: 14 }} /> },
+      cancelado: { color: 'error', label: 'Cancelado', icon: <CancelIcon sx={{ fontSize: 14 }} /> },
+      sin_repartidor: { color: 'error', label: 'Sin Repartidor', icon: <CancelIcon sx={{ fontSize: 14 }} /> }
     }
     return configs[status] || configs.pendiente
   }
@@ -546,14 +650,8 @@ export default function RestauranteDashboard() {
     }
   }
 
-  // Valores calculados en tiempo real
-  const servicesWeek = getWeekServices()
-  const weekTotal = getWeekTotal()
-  const totalHistorico = getTotalHistorico()
-  const pendingPayment = getPendingPayment()
-
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 2, sm: 3 }, minWidth: 0, width: '100%' }}>
       {loading && <LinearProgress />}
       
       {/* Alerta de nuevo mensaje */}
@@ -599,51 +697,392 @@ export default function RestauranteDashboard() {
             </Button>
           </Stack>
 
-          {/* Tarjeta Semana Actual */}
-          <Card sx={{ borderRadius: 2, background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`, color: 'white' }}>
-            <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                <CalendarIcon />
-                <Typography variant="subtitle1" fontWeight="bold">Semana Actual</Typography>
+          {/* ============================================ */}
+          {/* TARJETAS PRINCIPALES - SERVICIOS POR PERÍODO */}
+          {/* En móvil: una debajo de otra (xs=12), en desktop: lado a lado (sm=4) */}
+          {/* ============================================ */}
+          <Grid container spacing={{ xs: 1.5, sm: 3 }}>
+            {mainStatsCards.map((stat, index) => (
+              <Grid item xs={12} sm={4} key={index}>
+                <Card 
+                  sx={{ 
+                    height: '100%', 
+                    minWidth: 0, 
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+                    {loading ? (
+                      <Skeleton variant="rectangular" height={60} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.75rem' }, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {stat.title}
+                          </Typography>
+                          <Typography variant="h6" fontWeight="bold" sx={{ fontSize: { xs: '1.5rem', sm: '1.5rem' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {stat.value}
+                          </Typography>
+                          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
+                            <TrendingUpIcon sx={{ fontSize: 14, color: 'success.main' }} />
+                            <Typography variant="caption" sx={{ color: 'success.main', fontSize: '0.7rem' }}>
+                              {stat.subtitle}
+                            </Typography>
+                          </Stack>
+                        </Box>
+                        <Box sx={{ width: { xs: 40, sm: 48 }, height: { xs: 40, sm: 48 }, borderRadius: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: stat.bgColor, color: 'white', flexShrink: 0, boxShadow: `0 4px 12px ${stat.bgColor}40` }}>
+                          <stat.icon sx={{ fontSize: { xs: 20, sm: 24 } }} />
+                        </Box>
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+
+          {/* ============================================ */}
+          {/* TARJETAS DE ESTADÍSTICAS POR PERÍODO */}
+          {/* ============================================ */}
+          <Card sx={{ minWidth: 0 }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Typography variant={isMobile ? 'subtitle2' : 'subtitle1'} fontWeight="bold">
+                  Estadísticas por Período
+                </Typography>
+                <Chip 
+                  icon={<UpdateIcon sx={{ fontSize: 14 }} />} 
+                  label="Auto-actualiza" 
+                  size="small" 
+                  color="success" 
+                  variant="outlined" 
+                />
               </Stack>
-              <Typography variant="h6" fontWeight="medium">{formatWeekRange()}</Typography>
-              <Typography variant="body2" sx={{ opacity: 0.8, mt: 0.5 }}>
-                Los totales se reinician cada lunes
-              </Typography>
+              
+              {/* Tabs para seleccionar período */}
+              <Tabs 
+                value={statsTab} 
+                onChange={(e, v) => setStatsTab(v)} 
+                sx={{ mb: 2, minHeight: 36 }}
+                variant="fullWidth"
+              >
+                <Tab 
+                  icon={<TodayIcon sx={{ fontSize: 18 }} />} 
+                  label={isMobile ? '' : 'Hoy'} 
+                  id={0}
+                  sx={{ minHeight: 36, py: 0.5, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}
+                />
+                <Tab 
+                  icon={<WeekIcon sx={{ fontSize: 18 }} />} 
+                  label={isMobile ? '' : 'Semana'} 
+                  id={1}
+                  sx={{ minHeight: 36, py: 0.5, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}
+                />
+                <Tab 
+                  icon={<MonthIcon sx={{ fontSize: 18 }} />} 
+                  label={isMobile ? '' : 'Mes'} 
+                  id={2}
+                  sx={{ minHeight: 36, py: 0.5, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}
+                />
+              </Tabs>
+
+              {/* Contenido según tab seleccionado */}
+              <Grid container spacing={{ xs: 1.5, sm: 2 }}>
+                {/* DIARIO */}
+                {statsTab === 0 && (
+                  <>
+                    <Grid item xs={6} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.primary.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Servicios Hoy
+                          </Typography>
+                          <Typography variant="h5" fontWeight="bold" color="primary" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' } }}>
+                            {stats.servicesToday}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            Se reinicia mañana a las 12:00 a. m.
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.success.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Completados
+                          </Typography>
+                          <Typography variant="h5" fontWeight="bold" color="success.main" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' } }}>
+                            {stats.completedToday}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            {stats.servicesToday > 0 ? Math.round((stats.completedToday / stats.servicesToday) * 100) : 0}% tasa de éxito
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={12} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.warning.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Acumulado Por Pagar Hoy
+                          </Typography>
+                          <Typography variant="h6" fontWeight="bold" color="warning.main" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+                            {formatCurrency(stats.toPayToday)}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            Servicios entregados no liquidados
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                  </>
+                )}
+
+                {/* SEMANAL */}
+                {statsTab === 1 && (
+                  <>
+                    <Grid item xs={6} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.primary.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Servicios Semana
+                          </Typography>
+                          <Typography variant="h5" fontWeight="bold" color="primary" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' } }}>
+                            {stats.servicesThisWeek}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            Desde lunes a las 12:00 a. m.
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.success.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Completados
+                          </Typography>
+                          <Typography variant="h5" fontWeight="bold" color="success.main" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' } }}>
+                            {stats.completedThisWeek}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            {stats.servicesThisWeek > 0 ? Math.round((stats.completedThisWeek / stats.servicesThisWeek) * 100) : 0}% tasa de éxito
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={12} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.warning.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Por Pagar Esta Semana
+                          </Typography>
+                          <Typography variant="h6" fontWeight="bold" color="warning.main" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+                            {formatCurrency(stats.toPayThisWeek)}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            Pendiente de liquidación
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                  </>
+                )}
+
+                {/* MENSUAL */}
+                {statsTab === 2 && (
+                  <>
+                    <Grid item xs={6} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.primary.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Servicios del Mes
+                          </Typography>
+                          <Typography variant="h5" fontWeight="bold" color="primary" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' } }}>
+                            {stats.servicesThisMonth}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            Desde el 1° del mes
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.success.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Completados
+                          </Typography>
+                          <Typography variant="h5" fontWeight="bold" color="success.main" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' } }}>
+                            {stats.completedThisMonth}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            {stats.servicesThisMonth > 0 ? Math.round((stats.completedThisMonth / stats.servicesThisMonth) * 100) : 0}% tasa de éxito
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={12} sm={4}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: alpha(theme.palette.success.main, 0.1), borderRadius: 2, height: '100%' }}>
+                        <Stack spacing={0.5}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            Total Pagado en el Mes
+                          </Typography>
+                          <Typography variant="h6" fontWeight="bold" color="success.main" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+                            {formatCurrency(stats.paidThisMonth)}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}>
+                            Servicios liquidados
+                          </Typography>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                  </>
+                )}
+              </Grid>
             </CardContent>
           </Card>
 
-          {/* Stats Cards */}
+          {/* ============================================ */}
+          {/* TABLA DE SERVICIOS RECIENTES */}
+          {/* ============================================ */}
+          <Card sx={{ minWidth: 0 }}>
+            <CardContent sx={{ p: { xs: 1, sm: 2 } }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <PackageIcon color="primary" sx={{ fontSize: { xs: 18, sm: 24 } }} />
+                  <Typography variant={isMobile ? 'subtitle2' : 'subtitle1'} fontWeight="bold">
+                    Servicios Recientes
+                  </Typography>
+                </Stack>
+              </Stack>
+
+              {loading ? (
+                <Skeleton variant="rectangular" height={200} />
+              ) : serviciosRecientes.length === 0 ? (
+                <Paper sx={{ p: { xs: 2, sm: 4 }, textAlign: 'center', bgcolor: 'grey.50' }}>
+                  <PackageIcon sx={{ fontSize: { xs: 32, sm: 48 }, color: 'text.disabled', mb: 1 }} />
+                  <Typography variant="body2" color="text.secondary">No hay servicios registrados</Typography>
+                </Paper>
+              ) : (
+                <TableContainer sx={{ overflowX: 'auto', '&::-webkit-scrollbar': { height: 4 }, '&::-webkit-scrollbar-thumb': { bgcolor: 'grey.300', borderRadius: 3 } }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 'medium', color: 'text.secondary', whiteSpace: 'nowrap', fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>ID</TableCell>
+                        <TableCell sx={{ fontWeight: 'medium', color: 'text.secondary', whiteSpace: 'nowrap', fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Cliente</TableCell>
+                        {!isMobile && <TableCell sx={{ fontWeight: 'medium', color: 'text.secondary', fontSize: '0.875rem' }}>Zona</TableCell>}
+                        <TableCell sx={{ fontWeight: 'medium', color: 'text.secondary', whiteSpace: 'nowrap', fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Tarifa</TableCell>
+                        <TableCell sx={{ fontWeight: 'medium', color: 'text.secondary', whiteSpace: 'nowrap', fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Estado</TableCell>
+                        {!isMobile && <TableCell sx={{ fontWeight: 'medium', color: 'text.secondary', fontSize: '0.875rem' }}>Hora</TableCell>}
+                        <TableCell sx={{ fontWeight: 'medium', color: 'text.secondary', whiteSpace: 'nowrap', fontSize: { xs: '0.7rem', sm: '0.875rem' } }}></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {serviciosRecientes.map((service) => {
+                        const statusConfig = getStatusConfig(service.status)
+                        return (
+                          <TableRow 
+                            key={service.id} 
+                            hover 
+                            sx={{ '&:last-child td, &:last-child th': { border: 0 }, cursor: 'pointer' }} 
+                            onClick={() => setExpandedId(expandedId === service.id ? null : service.id)}
+                          >
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: { xs: '0.65rem', sm: '0.875rem' } }}>
+                                {service.serviceId}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight="medium" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' }, maxWidth: { xs: 80, sm: 'none' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {service.clientName || 'N/A'}
+                              </Typography>
+                            </TableCell>
+                            {!isMobile && (
+                              <TableCell>
+                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                                  {service.zoneName || 'N/A'}
+                                </Typography>
+                              </TableCell>
+                            )}
+                            <TableCell>
+                              <Typography variant="body2" fontWeight="bold" color="error.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
+                                {formatCurrency(service.deliveryFee)}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Chip 
+                                icon={statusConfig.icon} 
+                                label={statusConfig.label} 
+                                size="small" 
+                                color={statusConfig.color} 
+                                variant="outlined" 
+                                sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' }, height: { xs: 20, sm: 24 } }} 
+                              />
+                            </TableCell>
+                            {!isMobile && (
+                              <TableCell>
+                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                                  {formatTime(service.createdAt)}
+                                </Typography>
+                              </TableCell>
+                            )}
+                            <TableCell>
+                              {service.status === 'entregado' && service.driverId && (
+                                <Tooltip title="Calificar servicio">
+                                  <IconButton 
+                                    size="small" 
+                                    color="warning" 
+                                    onClick={(e) => { e.stopPropagation(); handleOpenRating(service) }}
+                                    sx={{ bgcolor: 'warning.main', color: 'white', '&:hover': { bgcolor: 'warning.dark' } }}
+                                  >
+                                    <StarIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ============================================ */}
+          {/* TARJETAS RÁPIDAS - ESTADOS ACTUALES */}
+          {/* ============================================ */}
           <Grid container spacing={{ xs: 1.5, sm: 3 }}>
-            <Grid item xs={6} sm={3}>
-              <Card sx={{ bgcolor: 'primary.main', color: 'white', height: '100%' }}>
-                <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
-                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Servicios Esta Semana</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{servicesWeek}</Typography>
+            <Grid item xs={4} sm={4}>
+              <Card sx={{ background: 'linear-gradient(135deg, #F39C12 0%, #F5B041 100%)', color: 'white', height: '100%', minWidth: 0 }}>
+                <CardContent sx={{ p: { xs: 1.5, sm: 2.5 }, textAlign: 'center' }}>
+                  <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.8rem' } }}>Por Pagar</Typography>
+                  <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' }, mt: 0.5 }}>
+                    {formatCurrency(stats.totalToPay)}
+                  </Typography>
                 </CardContent>
               </Card>
             </Grid>
-            <Grid item xs={6} sm={3}>
-              <Card sx={{ bgcolor: 'success.main', color: 'white', height: '100%' }}>
-                <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
-                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Total Esta Semana</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(weekTotal)}</Typography>
+            <Grid item xs={4} sm={4}>
+              <Card sx={{ background: 'linear-gradient(135deg, #FF6B35 0%, #FF8C5A 100%)', color: 'white', height: '100%', minWidth: 0 }}>
+                <CardContent sx={{ p: { xs: 1.5, sm: 2.5 }, textAlign: 'center' }}>
+                  <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.8rem' } }}>Pendientes</Typography>
+                  <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' }, mt: 0.5 }}>
+                    {stats.pendingServices}
+                  </Typography>
                 </CardContent>
               </Card>
             </Grid>
-            <Grid item xs={6} sm={3}>
-              <Card sx={{ bgcolor: 'info.main', color: 'white', height: '100%' }}>
-                <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
-                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Total Histórico</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(totalHistorico)}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <Card sx={{ bgcolor: 'warning.main', color: 'white', height: '100%' }}>
-                <CardContent sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center' }}>
-                  <Typography variant={isMobile ? 'caption' : 'body2'} sx={{ opacity: 0.9 }}>Por Pagar</Typography>
-                  <Typography variant={isMobile ? 'h5' : 'h3'} fontWeight="bold">{formatCurrency(pendingPayment)}</Typography>
+            <Grid item xs={4} sm={4}>
+              <Card sx={{ background: 'linear-gradient(135deg, #10B981 0%, #34D399 100%)', color: 'white', height: '100%', minWidth: 0 }}>
+                <CardContent sx={{ p: { xs: 1.5, sm: 2.5 }, textAlign: 'center' }}>
+                  <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.8rem' } }}>En Proceso</Typography>
+                  <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' }, mt: 0.5 }}>
+                    {stats.inProgressServices}
+                  </Typography>
                 </CardContent>
               </Card>
             </Grid>
@@ -655,7 +1094,6 @@ export default function RestauranteDashboard() {
               <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
                   <DeliveryIcon color="primary" />
-                  {/* ✅ REMOVED: Chip de mensajes aquí */}
                   <Typography variant="subtitle1" fontWeight="bold">Servicios Activos ({serviciosActivos.length})</Typography>
                 </Stack>
                 
@@ -683,7 +1121,6 @@ export default function RestauranteDashboard() {
                             <Grid item xs={12} sm={3}>
                               <Stack direction="row" spacing={1} alignItems="center">
                                 <Typography variant="subtitle2" fontWeight="bold">ID: {servicio.serviceId}</Typography>
-                                {/* ✅ REMOVED: Badge de mensajes aquí */}
                               </Stack>
                               <Typography variant="caption" color="text.secondary">{formatTime(servicio.createdAt)}</Typography>
                             </Grid>
@@ -694,7 +1131,7 @@ export default function RestauranteDashboard() {
                               </Box>
                             </Grid>
                             <Grid item xs={6} sm={2}>
-                              <Typography variant="body2" fontWeight="bold" color="primary">{formatCurrency(servicio.deliveryFee)}</Typography>
+                              <Typography variant="body2" fontWeight="bold" color="error.main">{formatCurrency(servicio.deliveryFee)}</Typography>
                             </Grid>
                             <Grid item xs={6} sm={1.5}>
                               <Chip icon={status.icon} label={status.label} size="small" color={status.color} />
@@ -713,7 +1150,6 @@ export default function RestauranteDashboard() {
                                   <IconButton size="small" color={unreadCount > 0 ? 'error' : 'primary'}
                                     onClick={(e) => { e.stopPropagation(); setChatService(servicio); setForceShowPulse(false); }}
                                     sx={{ bgcolor: unreadCount > 0 ? 'error.main' : 'primary.main', color: 'white' }}>
-                                    {/* ✅ ADDED: Pulse animation to list icon */}
                                     <ChatIcon fontSize="small" sx={{ animation: unreadCount > 0 ? 'pulse 1.5s infinite' : 'none', '@keyframes pulse': { '0%': { transform: 'scale(1)', opacity: 1 }, '50%': { transform: 'scale(1.2)', opacity: 0.8 }, '100%': { transform: 'scale(1)', opacity: 1 } } }} />
                                   </IconButton>
                                 </Tooltip>
@@ -766,108 +1202,6 @@ export default function RestauranteDashboard() {
             </Card>
           )}
 
-          {/* Servicios Recientes */}
-          <Card>
-            <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <PackageIcon color="primary" />
-                  <Typography variant={isMobile ? 'subtitle1' : 'h6'} fontWeight="bold">Servicios Recientes</Typography>
-                </Stack>
-              </Stack>
-              
-              {serviciosRecientes.length === 0 ? (
-                <Paper sx={{ p: 4, textAlign: 'center', bgcolor: 'grey.50' }}>
-                  <PackageIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
-                  <Typography variant="body2" color="text.secondary">No hay servicios registrados</Typography>
-                </Paper>
-              ) : (
-                <Stack spacing={{ xs: 1, sm: 2 }}>
-                  {serviciosRecientes.map((servicio) => {
-                    const status = getStatusConfig(servicio.status)
-                    const isExpanded = expandedId === servicio.id
-                    
-                    return (
-                      <Card key={servicio.id} variant="outlined" sx={{ borderRadius: 2 }}>
-                        <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-                          {isMobile ? (
-                            <>
-                              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                                <Box>
-                                  <Typography variant="subtitle2" fontWeight="bold">ID: {servicio.serviceId}</Typography>
-                                  <Typography variant="caption" color="text.secondary">{formatDate(servicio.createdAt)} - {formatTime(servicio.createdAt)}</Typography>
-                                </Box>
-                                <Chip icon={status.icon} label={status.label} size="small" color={status.color} />
-                              </Stack>
-                              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flex: 1, minWidth: 0 }}>
-                                  <LocationIcon fontSize="small" color="action" sx={{ fontSize: 14 }} />
-                                  <Typography variant="body2" noWrap sx={{ flex: 1 }}>{servicio.zoneName} - {servicio.deliveryAddress}</Typography>
-                                </Box>
-                                <Stack direction="row" alignItems="center" spacing={1}>
-                                  <Typography variant="body2" fontWeight="bold" color="primary">{formatCurrency(servicio.deliveryFee)}</Typography>
-                                  <IconButton size="small" onClick={() => setExpandedId(isExpanded ? null : servicio.id)}>
-                                    {isExpanded ? <CollapseIcon fontSize="small" /> : <ExpandIcon fontSize="small" />}
-                                  </IconButton>
-                                </Stack>
-                              </Stack>
-                            </>
-                          ) : (
-                            <Grid container spacing={2} alignItems="center">
-                              <Grid item xs={12} sm={3}>
-                                <Typography variant="subtitle2" fontWeight="bold">ID: {servicio.serviceId}</Typography>
-                                <Typography variant="caption" color="text.secondary">{formatDate(servicio.createdAt)} - {formatTime(servicio.createdAt)}</Typography>
-                              </Grid>
-                              <Grid item xs={12} sm={4}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                  <LocationIcon fontSize="small" color="action" />
-                                  <Typography variant="body2" noWrap>{servicio.zoneName} - {servicio.deliveryAddress}</Typography>
-                                </Box>
-                              </Grid>
-                              <Grid item xs={6} sm={2}>
-                                <Typography variant="body2" fontWeight="bold" color="primary">{formatCurrency(servicio.deliveryFee)}</Typography>
-                              </Grid>
-                              <Grid item xs={6} sm={2}>
-                                <Chip icon={status.icon} label={status.label} size="small" color={status.color} />
-                              </Grid>
-                              <Grid item xs={12} sm={1} sx={{ textAlign: 'right' }}>
-                                <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                                  {servicio.status === 'entregado' && servicio.driverId && (
-                                    <Tooltip title="Calificar servicio">
-                                      <IconButton size="small" color="warning" onClick={() => handleOpenRating(servicio)}
-                                        sx={{ bgcolor: 'warning.main', color: 'white' }}>
-                                        <StarIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                  )}
-                                  <IconButton size="small" onClick={() => setExpandedId(isExpanded ? null : servicio.id)}>
-                                    {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
-                                  </IconButton>
-                                </Stack>
-                              </Grid>
-                            </Grid>
-                          )}
-                          
-                          <Collapse in={isExpanded}>
-                            <Paper variant="outlined" sx={{ p: 2, mt: 2, bgcolor: alpha(theme.palette.primary.main, 0.02) }}>
-                              <Grid container spacing={2}>
-                                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Cliente</Typography><Typography variant="body2">{servicio.clientName || 'No especificado'}</Typography></Grid>
-                                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Teléfono</Typography><Typography variant="body2">{servicio.clientPhone || '-'}</Typography></Grid>
-                                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Método de pago</Typography><Typography variant="body2">{servicio.paymentMethod === 'efectivo' ? 'Efectivo' : 'Pagado'}</Typography></Grid>
-                                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Repartidor</Typography><Typography variant="body2">{servicio.driverName || 'Sin asignar'}</Typography></Grid>
-                                {servicio.notes && <Grid item xs={12}><Typography variant="caption" color="text.secondary">Notas</Typography><Typography variant="body2">{servicio.notes}</Typography></Grid>}
-                              </Grid>
-                            </Paper>
-                          </Collapse>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </Stack>
-              )}
-            </CardContent>
-          </Card>
-
           {/* New Service Dialog */}
           <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
             <DialogTitle sx={{ pb: 1 }}>
@@ -914,22 +1248,72 @@ export default function RestauranteDashboard() {
                     InputProps={{ startAdornment: <InputAdornment position="start"><PhoneIcon color="action" /></InputAdornment> }} />
                 </Grid>
                 
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Método de Pago</Typography>
+                <Grid item xs={12}>
+                  <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Método de Pago *</Typography>
                   <FormControl fullWidth size={isMobile ? 'small' : 'medium'}>
-                    <Select value={nuevoServicio.metodoPago} onChange={(e) => setNuevoServicio({ ...nuevoServicio, metodoPago: e.target.value })}>
+                    <Select value={nuevoServicio.metodoPago} onChange={(e) => setNuevoServicio({ ...nuevoServicio, metodoPago: e.target.value, montoCobrar: '', pagaCon: '' })}>
                       <MenuItem value="efectivo">Efectivo</MenuItem>
                       <MenuItem value="pagado">Pagado</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
                 
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Monto a Cobrar</Typography>
-                  <TextField fullWidth type="number" placeholder="Si es en efectivo" value={nuevoServicio.montoCobrar}
-                    onChange={(e) => setNuevoServicio({ ...nuevoServicio, montoCobrar: e.target.value })}
-                    InputProps={{ startAdornment: <InputAdornment position="start"><MoneyIcon color="action" /></InputAdornment> }} />
-                </Grid>
+                {nuevoServicio.metodoPago === 'efectivo' && (
+                  <>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Monto a Cobrar *</Typography>
+                      <TextField fullWidth type="number" placeholder="Total a cobrar al cliente" value={nuevoServicio.montoCobrar}
+                        onChange={(e) => setNuevoServicio({ ...nuevoServicio, montoCobrar: e.target.value })}
+                        InputProps={{ startAdornment: <InputAdornment position="start"><MoneyIcon color="action" /></InputAdornment> }} />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Paga Con *</Typography>
+                      <TextField fullWidth type="number" placeholder="Con cuánto paga el cliente" value={nuevoServicio.pagaCon}
+                        onChange={(e) => setNuevoServicio({ ...nuevoServicio, pagaCon: e.target.value })}
+                        error={parseFloat(nuevoServicio.pagaCon) > 0 && parseFloat(nuevoServicio.pagaCon) < parseFloat(nuevoServicio.montoCobrar)}
+                        helperText={parseFloat(nuevoServicio.pagaCon) > 0 && parseFloat(nuevoServicio.pagaCon) < parseFloat(nuevoServicio.montoCobrar) ? 'No puede ser menor al monto a cobrar' : ''}
+                        InputProps={{ startAdornment: <InputAdornment position="start"><MoneyIcon color="action" /></InputAdornment> }} />
+                    </Grid>
+                    
+                    {cambioCalculado > 0 && (
+                      <Grid item xs={12}>
+                        <Paper sx={{ p: 2, bgcolor: 'warning.lighter', borderRadius: 2, border: 1, borderColor: 'warning.main' }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Typography variant="body1" fontWeight="bold" color="warning.dark">
+                              💵 Cambio a llevar: ${cambioCalculado.toFixed(2)}
+                            </Typography>
+                          </Stack>
+                          <Typography variant="caption" color="warning.dark" sx={{ mt: 0.5, display: 'block' }}>
+                            💡 El repartidor debe pedir este monto al restaurante
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                    )}
+                    
+                    {parseFloat(nuevoServicio.pagaCon) > 0 && parseFloat(nuevoServicio.pagaCon) === parseFloat(nuevoServicio.montoCobrar) && (
+                      <Grid item xs={12}>
+                        <Paper sx={{ p: 2, bgcolor: 'success.lighter', borderRadius: 2, border: 1, borderColor: 'success.main' }}>
+                          <Typography variant="body2" fontWeight="medium" color="success.dark">
+                            ✅ Pago exacto - No requiere cambio
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                    )}
+                  </>
+                )}
+                
+                {nuevoServicio.metodoPago === 'pagado' && (
+                  <Grid item xs={12}>
+                    <Paper sx={{ p: 2, bgcolor: 'info.lighter', borderRadius: 2, border: 1, borderColor: 'info.main' }}>
+                      <Typography variant="body2" fontWeight="medium" color="info.dark">
+                        ✅ Cliente ya pagó - Solo entregar pedido
+                      </Typography>
+                      <Typography variant="caption" color="info.dark" sx={{ mt: 0.5, display: 'block' }}>
+                        El repartidor NO debe cobrar nada al cliente
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                )}
                 
                 <Grid item xs={12}>
                   <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Notas adicionales</Typography>

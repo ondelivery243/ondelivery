@@ -1,5 +1,5 @@
 // src/pages/admin/Zonas.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Box,
   Card,
@@ -59,7 +59,9 @@ export default function AdminZonas() {
     active: true
   })
 
-  // Cargar datos
+  // ============================================
+  // SUSCRIPCIÓN EN TIEMPO REAL
+  // ============================================
   useEffect(() => {
     setLoading(true)
     const unsubscribe = subscribeToZones((data) => {
@@ -69,20 +71,36 @@ export default function AdminZonas() {
     return () => unsubscribe()
   }, [])
 
-  // Filtrar zonas
-  const filteredZones = zones.filter(zone => 
-    zone.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  // ============================================
+  // ESTADÍSTICAS CALCULADAS (OPTIMIZADO)
+  // ============================================
+  const stats = useMemo(() => {
+    const activeZones = zones.filter(z => z.active && z.price)
+    const prices = activeZones.map(z => z.price)
+    
+    return {
+      total: zones.length,
+      active: zones.filter(z => z.active).length,
+      minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+      maxPrice: prices.length > 0 ? Math.max(...prices) : 0
+    }
+  }, [zones])
 
-  // Calcular tarifas min/max de forma segura
-  const activeZones = zones.filter(z => z.active && z.price)
-  const minPrice = activeZones.length > 0 
-    ? Math.min(...activeZones.map(z => z.price)) 
-    : 0
-  const maxPrice = activeZones.length > 0 
-    ? Math.max(...activeZones.map(z => z.price)) 
-    : 0
+  // ============================================
+  // FILTRADO (OPTIMIZADO)
+  // ============================================
+  const filteredZones = useMemo(() => {
+    if (!searchTerm) return zones
+    const term = searchTerm.toLowerCase()
+    return zones.filter(zone => 
+      zone.name?.toLowerCase().includes(term)
+    )
+  }, [zones, searchTerm])
 
+  // ============================================
+  // HANDLERS
+  // ============================================
+  
   // Abrir diálogo de edición
   const handleOpenEdit = (zone = null) => {
     if (zone) {
@@ -187,7 +205,7 @@ export default function AdminZonas() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="primary">
-                {zones.length}
+                {stats.total}
               </Typography>
               <Typography variant="body2" color="text.secondary">Total Zonas</Typography>
             </CardContent>
@@ -197,7 +215,7 @@ export default function AdminZonas() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="success.main">
-                {zones.filter(z => z.active).length}
+                {stats.active}
               </Typography>
               <Typography variant="body2" color="text.secondary">Activas</Typography>
             </CardContent>
@@ -207,7 +225,7 @@ export default function AdminZonas() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="primary">
-                {formatCurrency(minPrice)}
+                {formatCurrency(stats.minPrice)}
               </Typography>
               <Typography variant="body2" color="text.secondary">Tarifa Mínima</Typography>
             </CardContent>
@@ -217,7 +235,7 @@ export default function AdminZonas() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="primary">
-                {formatCurrency(maxPrice)}
+                {formatCurrency(stats.maxPrice)}
               </Typography>
               <Typography variant="body2" color="text.secondary">Tarifa Máxima</Typography>
             </CardContent>
@@ -243,79 +261,89 @@ export default function AdminZonas() {
 
       {/* Zones Grid */}
       <Grid container spacing={2}>
-        {filteredZones.map((zone) => (
-          <Grid item xs={12} sm={6} md={4} key={zone.id}>
-            <Card 
-              sx={{ 
-                borderRadius: 2,
-                opacity: zone.active ? 1 : 0.6,
-                transition: 'all 0.2s',
-                '&:hover': {
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                }
-              }}
-            >
-              <CardContent sx={{ p: 2 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <LocationIcon color={zone.active ? 'primary' : 'disabled'} />
-                    <Typography variant="subtitle1" fontWeight="bold">
-                      {zone.name}
-                    </Typography>
-                  </Box>
-                  <Chip
-                    label={zone.active ? 'Activa' : 'Inactiva'}
-                    color={zone.active ? 'success' : 'default'}
-                    size="small"
-                    variant="outlined"
-                  />
-                </Stack>
-                
-                <Paper sx={{ p: 1.5, mt: 2, bgcolor: alpha(theme.palette.primary.main, 0.05), textAlign: 'center' }}>
-                  <Typography variant="caption" color="text.secondary">Tarifa</Typography>
-                  <Typography variant="h5" fontWeight="bold" color="primary">
-                    {formatCurrency(zone.price)}
-                  </Typography>
-                </Paper>
-                
-                <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-                  <Button
-                    size="small"
-                    startIcon={<EditIcon />}
-                    onClick={() => handleOpenEdit(zone)}
-                    fullWidth
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    size="small"
-                    color={zone.active ? 'warning' : 'success'}
-                    onClick={() => handleToggleActive(zone)}
-                  >
-                    {zone.active ? 'Desactivar' : 'Activar'}
-                  </Button>
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onClick={() => setDeleteDialog({ open: true, zone })}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </CardContent>
-            </Card>
+        {loading ? (
+          <Grid item xs={12}>
+            <Paper sx={{ p: 4, textAlign: 'center' }}>
+              <Typography variant="body2" color="text.secondary">
+                Cargando...
+              </Typography>
+            </Paper>
           </Grid>
-        ))}
+        ) : filteredZones.length === 0 ? (
+          <Grid item xs={12}>
+            <Paper sx={{ p: 4, textAlign: 'center' }}>
+              <LocationIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                No se encontraron zonas
+              </Typography>
+            </Paper>
+          </Grid>
+        ) : (
+          filteredZones.map((zone) => (
+            <Grid item xs={12} sm={6} md={4} key={zone.id}>
+              <Card 
+                sx={{ 
+                  borderRadius: 2,
+                  opacity: zone.active ? 1 : 0.6,
+                  transition: 'all 0.2s',
+                  '&:hover': {
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  }
+                }}
+              >
+                <CardContent sx={{ p: 2 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <LocationIcon color={zone.active ? 'primary' : 'disabled'} />
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        {zone.name}
+                      </Typography>
+                    </Box>
+                    <Chip
+                      label={zone.active ? 'Activa' : 'Inactiva'}
+                      color={zone.active ? 'success' : 'default'}
+                      size="small"
+                      variant="outlined"
+                    />
+                  </Stack>
+                  
+                  <Paper sx={{ p: 1.5, mt: 2, bgcolor: alpha(theme.palette.primary.main, 0.05), textAlign: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">Tarifa</Typography>
+                    <Typography variant="h5" fontWeight="bold" color="primary">
+                      {formatCurrency(zone.price)}
+                    </Typography>
+                  </Paper>
+                  
+                  <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                    <Button
+                      size="small"
+                      startIcon={<EditIcon />}
+                      onClick={() => handleOpenEdit(zone)}
+                      fullWidth
+                    >
+                      Editar
+                    </Button>
+                    <Button
+                      size="small"
+                      color={zone.active ? 'warning' : 'success'}
+                      onClick={() => handleToggleActive(zone)}
+                    >
+                      {zone.active ? 'Desactivar' : 'Activar'}
+                    </Button>
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={() => setDeleteDialog({ open: true, zone })}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))
+        )}
       </Grid>
-
-      {filteredZones.length === 0 && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <LocationIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
-          <Typography variant="body2" color="text.secondary">
-            No se encontraron zonas
-          </Typography>
-        </Paper>
-      )}
 
       {/* Edit Dialog */}
       <Dialog

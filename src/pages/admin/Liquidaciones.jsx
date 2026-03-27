@@ -1,5 +1,5 @@
 // src/pages/admin/Liquidaciones.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Box,
   Card,
@@ -9,27 +9,26 @@ import {
   Grid,
   Chip,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Paper,
   useTheme,
   useMediaQuery,
   Tab,
   Tabs,
   LinearProgress,
-  CircularProgress
+  CircularProgress,
+  Collapse,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Divider
 } from '@mui/material'
 import {
   AttachMoney as MoneyIcon,
@@ -38,11 +37,11 @@ import {
   Receipt as ReceiptIcon,
   Store as StoreIcon,
   TwoWheeler as BikeIcon,
-  Payment as PaymentIcon,
   CalendarToday as CalendarIcon,
-  Info as InfoIcon,
-  ArrowDownward as CobrarIcon,
-  ArrowUpward as PagarIcon
+  ExpandMore as ExpandIcon,
+  ExpandLess as CollapseIcon,
+  Warning as WarningIcon,
+  History as HistoryIcon
 } from '@mui/icons-material'
 import { useSnackbar } from 'notistack'
 import { formatCurrency, formatDate } from '../../store/useStore'
@@ -58,12 +57,16 @@ import {
 } from '../../services/firestore'
 import { RIDERY_COLORS } from '../../theme/theme'
 
-const formatRate = (rate) => {
-  if (!rate || rate === 0) return '--'
+// ============================================
+// FUNCIONES FUERA DEL COMPONENTE
+// ============================================
+
+const formatVES = (amount) => {
+  if (!amount || amount === 0) return '0,00 Bs.'
   return new Intl.NumberFormat('es-VE', { 
     minimumFractionDigits: 2, 
     maximumFractionDigits: 2 
-  }).format(rate)
+  }).format(amount) + ' Bs.'
 }
 
 const formatRateWithBs = (rate) => {
@@ -74,33 +77,34 @@ const formatRateWithBs = (rate) => {
   }).format(rate) + ' Bs/$'
 }
 
-const formatVES = (amount) => {
-  if (!amount || amount === 0) return '0,00 Bs.'
-  return new Intl.NumberFormat('es-VE', { 
-    minimumFractionDigits: 2, 
-    maximumFractionDigits: 2 
-  }).format(amount) + ' Bs.'
-}
-
 const getMonday = (date) => {
   const d = new Date(date)
   const day = d.getDay()
   const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-  return new Date(d.setDate(diff))
+  const monday = new Date(d.setDate(diff))
+  monday.setHours(0, 0, 0, 0)
+  return monday
 }
 
 const getSunday = (monday) => {
   const d = new Date(monday)
   d.setDate(d.getDate() + 6)
+  d.setHours(23, 59, 59, 999)
   return d
 }
 
 const formatWeekRange = (monday) => {
   const sunday = getSunday(monday)
-  const options = { day: '2-digit', month: 'short' }
-  return monday.toLocaleDateString('es-VE', options) + ' - ' + sunday.toLocaleDateString('es-VE', options)
+  const options = { day: 'numeric', month: 'short' }
+  return `${monday.toLocaleDateString('es-VE', options)} - ${sunday.toLocaleDateString('es-VE', options)}`
 }
 
+const getWeekId = (date) => {
+  const monday = getMonday(date)
+  return monday.toISOString().split('T')[0]
+}
+
+// Generar últimas 8 semanas
 const generateWeeks = () => {
   const weeks = []
   const today = new Date()
@@ -114,8 +118,8 @@ const generateWeeks = () => {
     
     weeks.push({
       id: monday.toISOString().split('T')[0],
-      monday: monday,
-      sunday: sunday,
+      monday,
+      sunday,
       label: formatWeekRange(monday),
       isCurrent: i === 0
     })
@@ -124,30 +128,36 @@ const generateWeeks = () => {
   return weeks
 }
 
-const filterServicesByWeek = (services, weekId) => {
-  if (!weekId) return services
-  
-  const monday = new Date(weekId)
-  monday.setHours(0, 0, 0, 0)
-  
-  const sunday = getSunday(monday)
-  sunday.setHours(23, 59, 59, 999)
-  
-  return services.filter(service => {
-    const createdAt = service.createdAt?.toDate?.()
-    return createdAt && createdAt >= monday && createdAt <= sunday
-  })
-}
-
 const isServiceDelivered = (service) => {
   if (!service.status) return false
-  
   const statusLower = service.status.toLowerCase()
   return statusLower === 'entregado' || 
          statusLower === 'delivered' || 
          statusLower === 'completed' ||
          statusLower === 'completado'
 }
+
+// Determinar si la semana ya terminó (es domingo noche o después)
+const isWeekEnded = (weekMonday) => {
+  const now = new Date()
+  const sunday = getSunday(weekMonday)
+  return now > sunday
+}
+
+// Formatear fecha corta
+const formatShortDate = (timestamp) => {
+  if (!timestamp) return '--'
+  const date = timestamp.toDate?.() || new Date(timestamp)
+  return date.toLocaleDateString('es-VE', { 
+    day: '2-digit', 
+    month: '2-digit', 
+    year: 'numeric' 
+  })
+}
+
+// Constante de semanas
+const WEEKS = generateWeeks()
+const CURRENT_WEEK_ID = getWeekId(new Date())
 
 export default function AdminLiquidaciones() {
   const theme = useTheme()
@@ -162,42 +172,23 @@ export default function AdminLiquidaciones() {
   const [tabValue, setTabValue] = useState(0)
   const [exchangeRate, setExchangeRate] = useState({ rate: 0, lastUpdate: null })
   const [saving, setSaving] = useState(false)
+  const [expandedWeeks, setExpandedWeeks] = useState({ [CURRENT_WEEK_ID]: true })
+  const [confirmDialog, setConfirmDialog] = useState({ open: false, settlement: null })
   
-  const [createDialog, setCreateDialog] = useState({ 
-    open: false, 
-    type: 'restaurante',
-    entityId: '',
-    weekId: '',
-    serviceIds: []
-  })
-  const [payDialog, setPayDialog] = useState({ open: false, settlement: null })
-  
-  const [availableWeeks] = useState(generateWeeks())
   const currentYear = new Date().getFullYear()
 
+  // Suscripciones en tiempo real
   useEffect(() => {
     setLoading(true)
     
-    const unsubSettlements = subscribeToSettlements((data) => {
-      setSettlements(data)
-    })
-    
+    const unsubSettlements = subscribeToSettlements((data) => setSettlements(data))
     const unsubServices = subscribeToServices((data) => {
       setServices(data)
       setLoading(false)
     })
-    
-    const unsubRestaurants = subscribeToRestaurants((data) => {
-      setRestaurants(data)
-    })
-    
-    const unsubDrivers = subscribeToDrivers((data) => {
-      setDrivers(data)
-    })
-    
-    const unsubExchangeRate = subscribeToExchangeRate((data) => {
-      setExchangeRate(data)
-    })
+    const unsubRestaurants = subscribeToRestaurants((data) => setRestaurants(data))
+    const unsubDrivers = subscribeToDrivers((data) => setDrivers(data))
+    const unsubExchangeRate = subscribeToExchangeRate((data) => setExchangeRate(data))
     
     return () => {
       unsubSettlements()
@@ -208,205 +199,364 @@ export default function AdminLiquidaciones() {
     }
   }, [])
 
-  const restaurantSettlements = settlements.filter(s => s.type === 'restaurante' || !s.type)
-  const driverSettlements = settlements.filter(s => s.type === 'repartidor')
+  // ============================================
+  // CÁLCULOS MEMOIZADOS
+  // ============================================
 
-  // Servicios pendientes para RESTAURANTE (cobrar)
-  // Usa settledRestaurant si existe, si no usa settled (compatibilidad hacia atrás)
-  const unpaidServicesForRestaurant = services.filter(s => {
-    const isDelivered = isServiceDelivered(s)
-    const settledField = s.settledRestaurant !== undefined ? s.settledRestaurant : s.settled
-    return isDelivered && !settledField
-  })
+  // Filtrar liquidaciones por tipo
+  const restaurantSettlements = useMemo(() => 
+    settlements.filter(s => s.type === 'restaurante' || !s.type),
+    [settlements]
+  )
+  
+  const driverSettlements = useMemo(() => 
+    settlements.filter(s => s.type === 'repartidor'),
+    [settlements]
+  )
 
-  // Servicios pendientes para REPARTIDOR (pagar)
-  // Usa settledDriver si existe, si no usa settled (compatibilidad hacia atrás)
-  const unpaidServicesForDriver = services.filter(s => {
-    const isDelivered = isServiceDelivered(s)
-    const settledField = s.settledDriver !== undefined ? s.settledDriver : s.settled
-    return isDelivered && !settledField && !!s.driverId
-  })
-
-  const pendingByRestaurant = unpaidServicesForRestaurant.reduce((acc, service) => {
-    if (!service.restaurantId) return acc
+  // Servicios entregados por semana y entidad
+  const servicesByWeekAndEntity = useMemo(() => {
+    const result = {}
     
-    if (!acc[service.restaurantId]) {
-      acc[service.restaurantId] = {
-        restaurantId: service.restaurantId,
-        restaurantName: service.restaurantName || restaurants.find(r => r.id === service.restaurantId)?.name || 'Sin nombre',
-        services: [],
-        totalUSD: 0
+    WEEKS.forEach(week => {
+      result[week.id] = {
+        restaurants: {},
+        drivers: {}
       }
-    }
-    acc[service.restaurantId].services.push(service)
-    acc[service.restaurantId].totalUSD += service.deliveryFee || 0
-    return acc
-  }, {})
-
-  const pendingByDriver = unpaidServicesForDriver.reduce((acc, service) => {
-    if (!service.driverId) return acc
+    })
     
-    if (!acc[service.driverId]) {
-      acc[service.driverId] = {
-        driverId: service.driverId,
-        driverName: service.driverName || drivers.find(d => d.id === service.driverId)?.name || 'Sin nombre',
-        services: [],
-        totalUSD: 0
+    services.forEach(service => {
+      if (!isServiceDelivered(service)) return
+      
+      const createdAt = service.createdAt?.toDate?.()
+      if (!createdAt) return
+      
+      const weekId = getWeekId(createdAt)
+      if (!result[weekId]) return
+      
+      // Agrupar por restaurante
+      if (service.restaurantId) {
+        if (!result[weekId].restaurants[service.restaurantId]) {
+          result[weekId].restaurants[service.restaurantId] = {
+            restaurantId: service.restaurantId,
+            restaurantName: service.restaurantName || restaurants.find(r => r.id === service.restaurantId)?.name || 'Sin nombre',
+            services: [],
+            totalUSD: 0,
+            settled: false,
+            settlementId: null
+          }
+        }
+        result[weekId].restaurants[service.restaurantId].services.push(service)
+        result[weekId].restaurants[service.restaurantId].totalUSD += service.deliveryFee || 0
+        
+        const settledField = service.settledRestaurant !== undefined ? service.settledRestaurant : service.settled
+        if (settledField) {
+          result[weekId].restaurants[service.restaurantId].settled = true
+          result[weekId].restaurants[service.restaurantId].settlementId = service.restaurantSettlementId
+        }
       }
-    }
-    acc[service.driverId].services.push(service)
-    acc[service.driverId].totalUSD += service.driverEarnings || 0
-    return acc
-  }, {})
+      
+      // Agrupar por repartidor
+      if (service.driverId) {
+        if (!result[weekId].drivers[service.driverId]) {
+          result[weekId].drivers[service.driverId] = {
+            driverId: service.driverId,
+            driverName: service.driverName || drivers.find(d => d.id === service.driverId)?.name || 'Sin nombre',
+            services: [],
+            totalUSD: 0,
+            settled: false,
+            settlementId: null
+          }
+        }
+        result[weekId].drivers[service.driverId].services.push(service)
+        result[weekId].drivers[service.driverId].totalUSD += service.driverEarnings || 0
+        
+        const settledField = service.settledDriver !== undefined ? service.settledDriver : service.settled
+        if (settledField) {
+          result[weekId].drivers[service.driverId].settled = true
+          result[weekId].drivers[service.driverId].settlementId = service.driverSettlementId
+        }
+      }
+    })
+    
+    return result
+  }, [services, restaurants, drivers])
 
-  const handleCreateSettlement = async () => {
-    const { type, entityId, weekId } = createDialog
+  // Liquidaciones por semana
+  const settlementsByWeek = useMemo(() => {
+    const result = {}
     
-    if (!entityId) {
-      enqueueSnackbar('Selecciona un ' + (type === 'restaurante' ? 'restaurante' : 'repartidor'), { variant: 'warning' })
-      return
-    }
+    WEEKS.forEach(week => {
+      result[week.id] = {
+        restaurants: [],
+        drivers: []
+      }
+    })
     
-    if (!weekId) {
-      enqueueSnackbar('Selecciona una semana', { variant: 'warning' })
-      return
-    }
+    restaurantSettlements.forEach(settlement => {
+      if (settlement.weekId && result[settlement.weekId]) {
+        result[settlement.weekId].restaurants.push(settlement)
+      }
+    })
     
-    const unpaidList = type === 'restaurante' ? unpaidServicesForRestaurant : unpaidServicesForDriver
+    driverSettlements.forEach(settlement => {
+      if (settlement.weekId && result[settlement.weekId]) {
+        result[settlement.weekId].drivers.push(settlement)
+      }
+    })
     
-    const weekServices = filterServicesByWeek(
-      unpaidList.filter(s => 
-        type === 'restaurante' 
-          ? s.restaurantId === entityId 
-          : s.driverId === entityId
-      ),
-      weekId
-    )
+    return result
+  }, [restaurantSettlements, driverSettlements])
+
+  // Datos de cada semana con estado (SOLO semanas con servicios)
+  const weeksData = useMemo(() => {
+    return WEEKS.map(week => {
+      const weekServices = servicesByWeekAndEntity[week.id] || { restaurants: {}, drivers: {} }
+      const weekSettlements = settlementsByWeek[week.id] || { restaurants: [], drivers: [] }
+      const isEnded = isWeekEnded(week.monday)
+      
+      // Datos para restaurantes
+      const restaurantEntities = Object.values(weekServices.restaurants)
+      const totalRestaurantUSD = restaurantEntities.reduce((sum, e) => sum + e.totalUSD, 0)
+      const restaurantServicesCount = restaurantEntities.reduce((sum, e) => sum + e.services.length, 0)
+      const pendingRestaurantEntities = restaurantEntities.filter(e => !e.settled)
+      const pendingRestaurantUSD = pendingRestaurantEntities.reduce((sum, e) => sum + e.totalUSD, 0)
+      
+      // Estado restaurantes
+      let restaurantStatus = 'empty'
+      let restaurantStatusColor = 'grey'
+      if (week.isCurrent && !isEnded) {
+        if (restaurantServicesCount > 0) {
+          restaurantStatus = 'current'
+          restaurantStatusColor = 'primary'
+        }
+      } else if (weekSettlements.restaurants.some(s => s.status === 'pagado')) {
+        restaurantStatus = 'paid'
+        restaurantStatusColor = 'success'
+      } else if (weekSettlements.restaurants.some(s => s.status === 'pendiente')) {
+        restaurantStatus = 'pending_confirmation'
+        restaurantStatusColor = 'warning'
+      } else if (pendingRestaurantUSD > 0) {
+        restaurantStatus = 'pending_settlement'
+        restaurantStatusColor = 'error'
+      }
+      
+      // Datos para repartidores
+      const driverEntities = Object.values(weekServices.drivers)
+      const totalDriverUSD = driverEntities.reduce((sum, e) => sum + e.totalUSD, 0)
+      const driverServicesCount = driverEntities.reduce((sum, e) => sum + e.services.length, 0)
+      const pendingDriverEntities = driverEntities.filter(e => !e.settled)
+      const pendingDriverUSD = pendingDriverEntities.reduce((sum, e) => sum + e.totalUSD, 0)
+      
+      // Estado repartidores
+      let driverStatus = 'empty'
+      let driverStatusColor = 'grey'
+      if (week.isCurrent && !isEnded) {
+        if (driverServicesCount > 0) {
+          driverStatus = 'current'
+          driverStatusColor = 'primary'
+        }
+      } else if (weekSettlements.drivers.some(s => s.status === 'pagado')) {
+        driverStatus = 'paid'
+        driverStatusColor = 'success'
+      } else if (weekSettlements.drivers.some(s => s.status === 'pendiente')) {
+        driverStatus = 'pending_confirmation'
+        driverStatusColor = 'warning'
+      } else if (pendingDriverUSD > 0) {
+        driverStatus = 'pending_settlement'
+        driverStatusColor = 'error'
+      }
+      
+      return {
+        ...week,
+        isEnded,
+        hasServices: restaurantServicesCount > 0 || driverServicesCount > 0,
+        restaurants: {
+          entities: restaurantEntities,
+          totalUSD: totalRestaurantUSD,
+          servicesCount: restaurantServicesCount,
+          pendingEntities: pendingRestaurantEntities,
+          pendingUSD: pendingRestaurantUSD,
+          settlements: weekSettlements.restaurants,
+          status: restaurantStatus,
+          statusColor: restaurantStatusColor
+        },
+        drivers: {
+          entities: driverEntities,
+          totalUSD: totalDriverUSD,
+          servicesCount: driverServicesCount,
+          pendingEntities: pendingDriverEntities,
+          pendingUSD: pendingDriverUSD,
+          settlements: weekSettlements.drivers,
+          status: driverStatus,
+          statusColor: driverStatusColor
+        }
+      }
+    }).filter(week => week.hasServices) // FILTRAR: Solo semanas con servicios
+  }, [servicesByWeekAndEntity, settlementsByWeek])
+
+  // Estadísticas resumen
+  const stats = useMemo(() => {
+    let pendingSettlement = { count: 0, amount: 0 }
+    let pendingConfirmation = { count: 0, amount: 0 }
+    let paid = { count: 0, amount: 0 }
     
-    if (weekServices.length === 0) {
-      enqueueSnackbar('No hay servicios para la semana seleccionada', { variant: 'warning' })
+    weeksData.forEach(week => {
+      const data = tabValue === 0 ? week.restaurants : week.drivers
+      
+      if (data.status === 'pending_settlement') {
+        pendingSettlement.count++
+        pendingSettlement.amount += data.pendingUSD
+      } else if (data.status === 'pending_confirmation') {
+        pendingConfirmation.count++
+        pendingConfirmation.amount += data.settlements.reduce((sum, s) => sum + (s.amount || 0), 0)
+      } else if (data.status === 'paid') {
+        paid.count++
+        paid.amount += data.settlements.reduce((sum, s) => sum + (s.amount || 0), 0)
+      }
+    })
+    
+    return { pendingSettlement, pendingConfirmation, paid }
+  }, [weeksData, tabValue])
+
+  // Historial de liquidaciones pagadas
+  const paidSettlementsHistory = useMemo(() => {
+    const allSettlements = tabValue === 0 ? restaurantSettlements : driverSettlements
+    return allSettlements
+      .filter(s => s.status === 'pagado')
+      .sort((a, b) => {
+        const dateA = a.paidAt?.toDate?.() || a.updatedAt?.toDate?.() || new Date(0)
+        const dateB = b.paidAt?.toDate?.() || b.updatedAt?.toDate?.() || new Date(0)
+        return dateB - dateA
+      })
+  }, [restaurantSettlements, driverSettlements, tabValue])
+
+  // ============================================
+  // HANDLERS
+  // ============================================
+
+  const handleCreateSettlement = async (weekId, type) => {
+    const weekData = weeksData.find(w => w.id === weekId)
+    if (!weekData) return
+    
+    const entities = type === 'restaurante' ? weekData.restaurants.pendingEntities : weekData.drivers.pendingEntities
+    
+    if (entities.length === 0) {
+      enqueueSnackbar('No hay entidades pendientes para liquidar', { variant: 'warning' })
       return
     }
     
     setSaving(true)
     
     try {
-      const serviceIds = weekServices.map(s => s.id)
+      let totalUSD = 0
+      const serviceIds = []
       
-      const totalUSD = type === 'restaurante'
-        ? weekServices.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-        : weekServices.reduce((sum, s) => sum + (s.driverEarnings || 0), 0)
+      entities.forEach(entity => {
+        totalUSD += entity.totalUSD
+        entity.services.forEach(s => serviceIds.push(s.id))
+      })
       
       const totalVES = totalUSD * exchangeRate.rate
+      const week = WEEKS.find(w => w.id === weekId)
       
-      const selectedWeek = availableWeeks.find(w => w.id === weekId)
-      const periodLabel = selectedWeek ? selectedWeek.label : ''
-      
-      const entityName = type === 'restaurante'
-        ? restaurants.find(r => r.id === entityId)?.name || 'Restaurante'
-        : drivers.find(d => d.id === entityId)?.name || 'Repartidor'
-      
-      const settlementData = {
-        type,
-        entityId,
-        entityName,
-        amount: totalUSD,
-        amountVES: totalVES,
-        exchangeRate: exchangeRate.rate,
-        serviceCount: weekServices.length,
-        serviceIds,
-        period: 'Semana: ' + periodLabel,
-        weekId
-      }
-      
-      if (type === 'restaurante') {
-        settlementData.restaurantId = entityId
-        settlementData.restaurantName = entityName
-      } else {
-        settlementData.driverId = entityId
-        settlementData.driverName = entityName
-      }
-      
-      const result = await createSettlement(settlementData)
-      
-      if (result.success) {
-        for (const serviceId of serviceIds) {
-          if (type === 'restaurante') {
-            await updateService(serviceId, { 
-              settledRestaurant: true, 
-              restaurantSettlementId: result.id 
-            })
-          } else {
-            await updateService(serviceId, { 
-              settledDriver: true, 
-              driverSettlementId: result.id 
-            })
-          }
+      // Crear liquidación por cada entidad
+      for (const entity of entities) {
+        const entityTotalUSD = entity.totalUSD
+        const entityTotalVES = entityTotalUSD * exchangeRate.rate
+        
+        const settlementData = {
+          type,
+          entityId: entity.restaurantId || entity.driverId,
+          entityName: entity.restaurantName || entity.driverName,
+          amount: entityTotalUSD,
+          amountVES: entityTotalVES,
+          exchangeRate: exchangeRate.rate,
+          serviceCount: entity.services.length,
+          serviceIds: entity.services.map(s => s.id),
+          period: 'Semana: ' + week.label,
+          weekId
         }
         
-        const actionText = type === 'restaurante' ? 'Cobrar' : 'Pagar'
-        enqueueSnackbar('Liquidacion creada: $' + totalUSD.toFixed(2) + ' USD = ' + formatVES(totalVES) + ' (' + actionText + ')', { variant: 'success' })
-        setCreateDialog({ open: false, type: 'restaurante', entityId: '', weekId: '', serviceIds: [] })
-      } else {
-        enqueueSnackbar(result.error || 'Error al crear liquidacion', { variant: 'error' })
+        if (type === 'restaurante') {
+          settlementData.restaurantId = entity.restaurantId
+          settlementData.restaurantName = entity.restaurantName
+        } else {
+          settlementData.driverId = entity.driverId
+          settlementData.driverName = entity.driverName
+        }
+        
+        const result = await createSettlement(settlementData)
+        
+        if (result.success) {
+          for (const serviceId of entity.services.map(s => s.id)) {
+            if (type === 'restaurante') {
+              await updateService(serviceId, { settledRestaurant: true, restaurantSettlementId: result.id })
+            } else {
+              await updateService(serviceId, { settledDriver: true, driverSettlementId: result.id })
+            }
+          }
+        }
       }
+      
+      enqueueSnackbar(`Liquidación creada: $${totalUSD.toFixed(2)} = ${formatVES(totalVES)}`, { variant: 'success' })
     } catch (error) {
-      console.error('Error creando liquidacion:', error)
-      enqueueSnackbar('Error al crear liquidacion: ' + error.message, { variant: 'error' })
+      console.error('Error:', error)
+      enqueueSnackbar('Error al crear liquidación: ' + error.message, { variant: 'error' })
     } finally {
       setSaving(false)
     }
   }
 
-  const handlePaySettlement = async () => {
-    if (!payDialog.settlement) return
+  const handleConfirmSettlement = async () => {
+    if (!confirmDialog.settlement) return
     
-    const result = await paySettlement(payDialog.settlement.id)
+    const result = await paySettlement(confirmDialog.settlement.id)
     
     if (result.success) {
-      const actionText = payDialog.settlement.type === 'restaurante' ? 'Cobrado' : 'Pagado'
-      enqueueSnackbar('Liquidacion marcada como ' + actionText, { variant: 'success' })
-      setPayDialog({ open: false, settlement: null })
+      const actionText = confirmDialog.settlement.type === 'restaurante' ? 'Cobrado' : 'Pagado'
+      enqueueSnackbar(`Liquidación marcada como ${actionText}`, { variant: 'success' })
+      setConfirmDialog({ open: false, settlement: null })
     } else {
       enqueueSnackbar('Error al procesar', { variant: 'error' })
     }
   }
 
-  const pendingAmount = Object.values(tabValue === 0 ? pendingByRestaurant : pendingByDriver)
-    .reduce((sum, p) => sum + p.totalUSD, 0)
-  
-  const pendingCount = tabValue === 0 ? unpaidServicesForRestaurant.length : unpaidServicesForDriver.length
-
-  const displaySettlements = tabValue === 0 ? restaurantSettlements : driverSettlements
-
-  const openCreateDialog = (type = 'restaurante', entityId = '', weekId = '') => {
-    setCreateDialog({
-      open: true,
-      type,
-      entityId,
-      weekId: weekId || availableWeeks[0]?.id || '',
-      serviceIds: []
-    })
+  const toggleWeek = (weekId) => {
+    setExpandedWeeks(prev => ({ ...prev, [weekId]: !prev[weekId] }))
   }
 
-  const getEntityServicesForWeek = (type, entityId, weekId) => {
-    if (!entityId || !weekId) return []
+  // ============================================
+  // HELPERS RENDER
+  // ============================================
+
+  const getStatusConfig = (status) => {
+    const configs = {
+      empty: { icon: '—', label: 'Sin servicios', color: 'text.disabled', bgColor: 'grey.100' },
+      current: { icon: '🔵', label: 'En curso', color: 'primary.main', bgColor: 'primary.light' },
+      pending_settlement: { icon: '🟠', label: 'Por liquidar', color: 'error.main', bgColor: 'error.light' },
+      pending_confirmation: { icon: '🟡', label: 'Pendiente de cobro', color: 'warning.main', bgColor: 'warning.light' },
+      paid: { icon: '✅', label: 'Cobrado', color: 'success.main', bgColor: 'success.light' }
+    }
     
-    const unpaidList = type === 'restaurante' ? unpaidServicesForRestaurant : unpaidServicesForDriver
+    if (tabValue === 1 && status === 'pending_confirmation') {
+      configs.pending_confirmation.label = 'Pendiente de pago'
+    }
+    if (tabValue === 1 && status === 'paid') {
+      configs.paid.label = 'Pagado'
+    }
     
-    const entityServices = unpaidList.filter(s => 
-      type === 'restaurante' 
-        ? s.restaurantId === entityId 
-        : s.driverId === entityId
-    )
-    
-    return filterServicesByWeek(entityServices, weekId)
+    return configs[status] || configs.empty
   }
+
+  const currentData = tabValue === 0 ? 'restaurants' : 'drivers'
+  const actionText = tabValue === 0 ? { verb: 'Cobrar', noun: 'Cobrado' } : { verb: 'Pagar', noun: 'Pagado' }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {loading && <LinearProgress />}
       
+      {/* Header */}
       <Stack 
         direction={{ xs: 'column', sm: 'row' }} 
         justifyContent="space-between" 
@@ -421,564 +571,403 @@ export default function AdminLiquidaciones() {
             Gestiona los cobros a restaurantes y pagos a repartidores
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
-          <Chip 
-            icon={<MoneyIcon />} 
-            label={'Tasa: ' + formatRateWithBs(exchangeRate.rate)}
-            color="primary"
-            variant="outlined"
-          />
-          <Button
-            variant="contained"
-            startIcon={<MoneyIcon />}
-            onClick={() => openCreateDialog()}
-          >
-            Nueva Liquidacion
-          </Button>
-        </Stack>
+        <Chip 
+          icon={<MoneyIcon />} 
+          label={'Tasa: ' + formatRateWithBs(exchangeRate.rate)}
+          color="primary"
+          variant="outlined"
+        />
       </Stack>
 
+      {/* Tarjetas Resumen */}
       <Grid container spacing={2}>
-        <Grid item xs={6} sm={3}>
+        <Grid item xs={4}>
+          <Card sx={{ borderRadius: 2, bgcolor: 'error.light', height: '100%' }}>
+            <CardContent sx={{ p: 2, textAlign: 'center' }}>
+              <WarningIcon sx={{ color: 'error.main', mb: 0.5 }} />
+              <Typography variant="h5" fontWeight="bold" color="error.dark">
+                ${stats.pendingSettlement.amount.toFixed(2)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Por Liquidar ({stats.pendingSettlement.count} sem.)
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={4}>
           <Card sx={{ borderRadius: 2, bgcolor: 'warning.light', height: '100%' }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <ClockIcon sx={{ color: 'warning.main', mb: 0.5 }} />
               <Typography variant="h5" fontWeight="bold" color="warning.dark">
-                ${pendingAmount.toFixed(2)}
+                ${stats.pendingConfirmation.amount.toFixed(2)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Por {tabValue === 0 ? 'Cobrar' : 'Pagar'} ({pendingCount} servicios)
+                Pendiente Confirm. ({stats.pendingConfirmation.count} sem.)
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid item xs={4}>
           <Card sx={{ borderRadius: 2, bgcolor: 'success.light', height: '100%' }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <CheckIcon sx={{ color: 'success.main', mb: 0.5 }} />
               <Typography variant="h5" fontWeight="bold" color="success.dark">
-                ${displaySettlements.filter(s => s.status === 'pagado').reduce((sum, s) => sum + (s.amount || 0), 0).toFixed(2)}
+                ${stats.paid.amount.toFixed(2)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Total {tabValue === 0 ? 'Cobrado' : 'Pagado'} (USD)
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={3}>
-          <Card sx={{ borderRadius: 2, height: '100%' }}>
-            <CardContent sx={{ p: 2, textAlign: 'center' }}>
-              <ReceiptIcon sx={{ color: 'primary.main', mb: 0.5 }} />
-              <Typography variant="h5" fontWeight="bold">
-                {displaySettlements.filter(s => s.status === 'pendiente').length}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Pendientes de {tabValue === 0 ? 'Cobro' : 'Pago'}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={3}>
-          <Card sx={{ borderRadius: 2, height: '100%' }}>
-            <CardContent sx={{ p: 2, textAlign: 'center' }}>
-              <PaymentIcon sx={{ color: 'success.main', mb: 0.5 }} />
-              <Typography variant="h5" fontWeight="bold">
-                {displaySettlements.filter(s => s.status === 'pagado').length}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {tabValue === 0 ? 'Cobradas' : 'Pagadas'}
+                {actionText.noun} ({stats.paid.count} sem.)
               </Typography>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
+      {/* Tabs */}
       <Paper sx={{ borderRadius: 2 }}>
-        <Tabs
-          value={tabValue}
-          onChange={(e, v) => setTabValue(v)}
-          variant="fullWidth"
-        >
+        <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} variant="fullWidth">
           <Tab 
             icon={<StoreIcon />} 
             iconPosition="start"
-            label={
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Typography>Restaurantes</Typography>
-                <Chip 
-                  size="small" 
-                  label={Object.keys(pendingByRestaurant).length}
-                  color="warning"
-                />
-              </Stack>
-            }
+            label={<Typography>Restaurantes</Typography>}
           />
           <Tab 
             icon={<BikeIcon />} 
             iconPosition="start"
-            label={
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Typography>Repartidores</Typography>
-                <Chip 
-                  size="small" 
-                  label={Object.keys(pendingByDriver).length}
-                  color="success"
-                />
-              </Stack>
-            }
+            label={<Typography>Repartidores</Typography>}
           />
         </Tabs>
       </Paper>
 
-      <Card sx={{ borderRadius: 2 }}>
-        <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-          <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>
-            {tabValue === 0 ? 'Pendientes de Cobrar a Restaurantes' : 'Pendientes de Pagar a Repartidores'}
+      {/* Lista de Semanas (Solo con servicios) */}
+      {weeksData.length > 0 ? (
+        <Stack spacing={2}>
+          {weeksData.map((week) => {
+            const data = week[currentData]
+            const statusConfig = getStatusConfig(data.status)
+            const isExpanded = expandedWeeks[week.id]
+            
+            return (
+              <Card key={week.id} sx={{ borderRadius: 2 }}>
+                {/* Header de la semana */}
+                <Stack 
+                  direction="row" 
+                  alignItems="center" 
+                  justifyContent="space-between"
+                  sx={{ 
+                    p: 2, 
+                    cursor: 'pointer',
+                    bgcolor: statusConfig.bgColor,
+                    '&:hover': { opacity: 0.9 }
+                  }}
+                  onClick={() => toggleWeek(week.id)}
+                >
+                  <Stack direction="row" alignItems="center" spacing={2}>
+                    <CalendarIcon color="action" />
+                    <Box>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        {week.isCurrent ? '📅 SEMANA ACTUAL • ' : '📅 SEMANA '}
+                        {week.label}
+                      </Typography>
+                      {data.servicesCount > 0 && (
+                        <Typography variant="caption" color="text.secondary">
+                          {data.servicesCount} servicios • ${data.totalUSD.toFixed(2)}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Stack>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Chip 
+                      size="small"
+                      label={`${statusConfig.icon} ${statusConfig.label}`}
+                      sx={{ 
+                        fontWeight: 'medium',
+                        color: statusConfig.color,
+                        bgcolor: 'white'
+                      }}
+                    />
+                    <IconButton size="small">
+                      {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
+                    </IconButton>
+                  </Stack>
+                </Stack>
+                
+                {/* Contenido expandido */}
+                <Collapse in={isExpanded}>
+                  <CardContent sx={{ pt: 2 }}>
+                    {/* Mensaje semana actual en curso */}
+                    {week.isCurrent && !week.isEnded && (
+                      <Paper sx={{ p: 2, mb: 2, bgcolor: 'primary.light', borderRadius: 2 }}>
+                        <Typography variant="body2" color="primary.dark">
+                          🔵 La semana está en curso. La liquidación estará disponible el domingo noche.
+                        </Typography>
+                      </Paper>
+                    )}
+                    
+                    {/* Entidades de la semana */}
+                    {data.entities.length > 0 && (
+                      <Stack spacing={1}>
+                        {data.entities.map((entity) => {
+                          const entitySettlement = data.settlements.find(s => s.entityId === (entity.restaurantId || entity.driverId))
+                          const isSettled = entity.settled || entitySettlement
+                          
+                          return (
+                            <Paper 
+                              key={entity.restaurantId || entity.driverId}
+                              variant="outlined"
+                              sx={{ p: 1.5, borderRadius: 2 }}
+                            >
+                              <Grid container spacing={1} alignItems="center">
+                                <Grid item xs={12} sm={4}>
+                                  <Typography variant="body2" fontWeight="medium">
+                                    🏪 {entity.restaurantName || entity.driverName}
+                                  </Typography>
+                                </Grid>
+                                <Grid item xs={6} sm={2}>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Servicios
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    {entity.services.length}
+                                  </Typography>
+                                </Grid>
+                                <Grid item xs={6} sm={2}>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Total USD
+                                  </Typography>
+                                  <Typography variant="body2" fontWeight="bold">
+                                    ${entity.totalUSD.toFixed(2)}
+                                  </Typography>
+                                </Grid>
+                                <Grid item xs={12} sm={4} sx={{ textAlign: 'right' }}>
+                                  {isSettled && entitySettlement ? (
+                                    <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
+                                      <Typography variant="caption" color="text.secondary">
+                                        = {formatVES(entitySettlement.amountVES)}
+                                      </Typography>
+                                      {entitySettlement.status === 'pendiente' ? (
+                                        <Button
+                                          size="small"
+                                          variant="contained"
+                                          color="warning"
+                                          onClick={() => setConfirmDialog({ open: true, settlement: entitySettlement })}
+                                        >
+                                          Confirmar
+                                        </Button>
+                                      ) : (
+                                        <Chip 
+                                          size="small" 
+                                          icon={<CheckIcon />} 
+                                          label={actionText.noun}
+                                          color="success"
+                                        />
+                                      )}
+                                    </Stack>
+                                  ) : !isSettled && week.isEnded ? (
+                                    <Typography variant="caption" color="error.main">
+                                      Pendiente
+                                    </Typography>
+                                  ) : null}
+                                </Grid>
+                              </Grid>
+                            </Paper>
+                          )
+                        })}
+                      </Stack>
+                    )}
+                    
+                    {/* Total y acciones */}
+                    {data.entities.length > 0 && (
+                      <Paper sx={{ p: 2, mt: 2, bgcolor: 'grey.100', borderRadius: 2 }}>
+                        <Grid container spacing={2} alignItems="center">
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Total Semana
+                            </Typography>
+                            <Typography variant="h6" fontWeight="bold">
+                              ${data.totalUSD.toFixed(2)}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6} sx={{ textAlign: 'right' }}>
+                            {data.status === 'pending_settlement' && (
+                              <Button
+                                variant="contained"
+                                color="error"
+                                onClick={() => handleCreateSettlement(week.id, tabValue === 0 ? 'restaurante' : 'repartidor')}
+                                disabled={saving}
+                                startIcon={saving ? <CircularProgress size={16} /> : <MoneyIcon />}
+                              >
+                                Crear Liquidación
+                              </Button>
+                            )}
+                            {data.status === 'pending_confirmation' && data.settlements.length > 0 && (
+                              <Typography variant="caption" color="warning.main">
+                                = {formatVES(data.settlements.reduce((sum, s) => sum + (s.amountVES || 0), 0))}
+                              </Typography>
+                            )}
+                            {data.status === 'paid' && data.settlements.length > 0 && (
+                              <Typography variant="body2" fontWeight="bold" color="success.main">
+                                = {formatVES(data.settlements.reduce((sum, s) => sum + (s.amountVES || 0), 0))}
+                              </Typography>
+                            )}
+                          </Grid>
+                        </Grid>
+                      </Paper>
+                    )}
+                  </CardContent>
+                </Collapse>
+              </Card>
+            )
+          })}
+        </Stack>
+      ) : (
+        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
+          <Typography variant="body1" color="text.secondary">
+            No hay servicios registrados
           </Typography>
-          
-          {Object.keys(tabValue === 0 ? pendingByRestaurant : pendingByDriver).length === 0 ? (
-            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
-              <CheckIcon sx={{ fontSize: 32, color: 'success.main', mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">
-                No hay servicios pendientes de {tabValue === 0 ? 'cobrar a restaurantes' : 'pagar a repartidores'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-                Total servicios: {services.length} | 
-                {tabValue === 0 
-                  ? ` Pendientes cobro: ${unpaidServicesForRestaurant.length}` 
-                  : ` Pendientes pago: ${unpaidServicesForDriver.length}`}
-              </Typography>
-            </Paper>
-          ) : (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>{tabValue === 0 ? 'Restaurante' : 'Repartidor'}</TableCell>
-                    <TableCell align="center">Servicios</TableCell>
-                    <TableCell align="right">Total USD</TableCell>
-                    {exchangeRate.rate > 0 && <TableCell align="right">Equivalente Bs</TableCell>}
-                    <TableCell align="right">Accion</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {Object.values(tabValue === 0 ? pendingByRestaurant : pendingByDriver).map((item) => (
-                    <TableRow key={item.restaurantId || item.driverId}>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {item.restaurantName || item.driverName}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip label={item.services.length} size="small" />
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography variant="body2" fontWeight="bold" color={tabValue === 0 ? 'warning.main' : 'success.main'}>
-                          ${item.totalUSD.toFixed(2)}
-                        </Typography>
-                      </TableCell>
-                      {exchangeRate.rate > 0 && (
-                        <TableCell align="right">
-                          <Typography variant="body2" color="text.secondary">
-                            {formatVES(item.totalUSD * exchangeRate.rate)}
-                          </Typography>
-                        </TableCell>
-                      )}
-                      <TableCell align="right">
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={tabValue === 0 ? 'warning' : 'success'}
-                          onClick={() => openCreateDialog(
-                            tabValue === 0 ? 'restaurante' : 'repartidor',
-                            item.restaurantId || item.driverId,
-                            availableWeeks[0]?.id || ''
-                          )}
-                        >
-                          {tabValue === 0 ? 'Cobrar' : 'Pagar'}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </CardContent>
-      </Card>
+        </Paper>
+      )}
 
-      <Card sx={{ borderRadius: 2 }}>
-        <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-          <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>
-            Historial de Liquidaciones ({tabValue === 0 ? 'Restaurantes - Cobros' : 'Repartidores - Pagos'})
+      {/* Historial de Cobros/Pagos */}
+      <Paper sx={{ borderRadius: 2, mt: 2 }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ p: 2, pb: 1 }}>
+          <HistoryIcon color="action" />
+          <Typography variant="subtitle1" fontWeight="bold">
+            Historial de {tabValue === 0 ? 'Cobros' : 'Pagos'}
           </Typography>
-          
-          {displaySettlements.length === 0 ? (
-            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
-              <ReceiptIcon sx={{ fontSize: 32, color: 'text.disabled', mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">
-                No hay liquidaciones registradas
-              </Typography>
-            </Paper>
-          ) : (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Fecha</TableCell>
-                    <TableCell>{tabValue === 0 ? 'Restaurante' : 'Repartidor'}</TableCell>
-                    {!isMobile && <TableCell>Periodo</TableCell>}
-                    <TableCell align="center">Servicios</TableCell>
-                    <TableCell align="right">Monto USD</TableCell>
-                    {!isMobile && exchangeRate.rate > 0 && <TableCell align="right">Tasa</TableCell>}
-                    <TableCell>Estado</TableCell>
-                    <TableCell align="right">Accion</TableCell>
+        </Stack>
+        <Divider />
+        
+        {paidSettlementsHistory.length > 0 ? (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Fecha</TableCell>
+                  <TableCell>{tabValue === 0 ? 'Restaurante' : 'Repartidor'}</TableCell>
+                  <TableCell align="center">Serv.</TableCell>
+                  <TableCell align="right">Monto USD</TableCell>
+                  <TableCell align="right">Equivalente Bs</TableCell>
+                  <TableCell align="right">Tasa</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paidSettlementsHistory.map((settlement) => (
+                  <TableRow key={settlement.id} hover>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {formatShortDate(settlement.paidAt || settlement.updatedAt)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="medium">
+                        {settlement.restaurantName || settlement.driverName || settlement.entityName}
+                      </Typography>
+                      {settlement.period && (
+                        <Typography variant="caption" color="text.secondary">
+                          {settlement.period}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Chip size="small" label={settlement.serviceCount || 0} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" fontWeight="bold" color="success.main">
+                        ${(settlement.amount || 0).toFixed(2)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2">
+                        {formatVES(settlement.amountVES)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="caption" color="text.secondary">
+                        {settlement.exchangeRate?.toFixed(2) || '--'} Bs/$                       </Typography>
+                    </TableCell>
                   </TableRow>
-                </TableHead>
-                <TableBody>
-                  {displaySettlements.map((settlement) => (
-                    <TableRow key={settlement.id} hover>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {formatDate(settlement.createdAt)}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {settlement.restaurantName || settlement.driverName}
-                        </Typography>
-                      </TableCell>
-                      {!isMobile && (
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {settlement.period || '-'}
-                          </Typography>
-                        </TableCell>
-                      )}
-                      <TableCell align="center">
-                        <Typography variant="body2">
-                          {settlement.serviceCount || '-'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography variant="body2" fontWeight="bold">
-                          ${(settlement.amount || 0).toFixed(2)}
-                        </Typography>
-                      </TableCell>
-                      {!isMobile && exchangeRate.rate > 0 && (
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {formatRate(settlement.exchangeRate)} Bs.
-                          </Typography>
-                        </TableCell>
-                      )}
-                      <TableCell>
-                        <Chip
-                          icon={settlement.status === 'pagado' ? <CheckIcon /> : <ClockIcon />}
-                          label={settlement.status === 'pagado' 
-                            ? (settlement.type === 'restaurante' ? 'Cobrado' : 'Pagado')
-                            : 'Pendiente'}
-                          size="small"
-                          color={settlement.status === 'pagado' ? 'success' : 'warning'}
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell align="right">
-                        {settlement.status === 'pendiente' && (
-                          <Button
-                            size="small"
-                            variant="contained"
-                            color={settlement.type === 'restaurante' ? 'warning' : 'success'}
-                            startIcon={settlement.type === 'restaurante' ? <CobrarIcon /> : <PagarIcon />}
-                            onClick={() => setPayDialog({ open: true, settlement })}
-                          >
-                            {settlement.type === 'restaurante' ? 'Cobrar' : 'Pagar'}
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        ) : (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">
+              No hay {tabValue === 0 ? 'cobros' : 'pagos'} registrados
+            </Typography>
+          </Box>
+        )}
+      </Paper>
 
+      {/* Diálogo Confirmar */}
       <Dialog
-        open={createDialog.open}
-        onClose={() => !saving && setCreateDialog({ open: false, type: 'restaurante', entityId: '', weekId: '', serviceIds: [] })}
+        open={confirmDialog.open}
+        onClose={() => setConfirmDialog({ open: false, settlement: null })}
         maxWidth="sm"
         fullWidth
       >
         <DialogTitle>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Typography variant="h6">
-              {createDialog.type === 'restaurante' ? 'Cobrar a Restaurante' : 'Pagar a Repartidor'}
-            </Typography>
-            <Chip 
-              size="small" 
-              icon={createDialog.type === 'restaurante' ? <CobrarIcon /> : <PagarIcon />}
-              label={createDialog.type === 'restaurante' ? 'Para Cobrar' : 'Para Pagar'}
-              color={createDialog.type === 'restaurante' ? 'warning' : 'success'}
-            />
-          </Stack>
+          Confirmar {confirmDialog.settlement?.type === 'restaurante' ? 'Cobro' : 'Pago'}
         </DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <FormControl fullWidth>
-              <InputLabel>Tipo de Liquidacion</InputLabel>
-              <Select
-                value={createDialog.type}
-                label="Tipo de Liquidacion"
-                onChange={(e) => setCreateDialog(prev => ({ ...prev, type: e.target.value, entityId: '' }))}
-                disabled={saving}
-              >
-                <MenuItem value="restaurante">
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <CobrarIcon fontSize="small" sx={{ color: 'warning.main' }} />
-                    <Typography>Restaurante</Typography>
-                    <Typography variant="caption" color="text.secondary">(Cobrar comision)</Typography>
-                  </Stack>
-                </MenuItem>
-                <MenuItem value="repartidor">
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <PagarIcon fontSize="small" sx={{ color: 'success.main' }} />
-                    <Typography>Repartidor</Typography>
-                    <Typography variant="caption" color="text.secondary">(Pagar ganancias)</Typography>
-                  </Stack>
-                </MenuItem>
-              </Select>
-            </FormControl>
-            
-            <FormControl fullWidth>
-              <InputLabel>{createDialog.type === 'restaurante' ? 'Restaurante' : 'Repartidor'}</InputLabel>
-              <Select
-                value={createDialog.entityId}
-                label={createDialog.type === 'restaurante' ? 'Restaurante' : 'Repartidor'}
-                onChange={(e) => setCreateDialog(prev => ({ ...prev, entityId: e.target.value }))}
-                disabled={saving}
-              >
-                {createDialog.type === 'restaurante' 
-                  ? restaurants.map((restaurant) => {
-                      const pending = pendingByRestaurant[restaurant.id]
-                      return (
-                        <MenuItem key={restaurant.id} value={restaurant.id}>
-                          <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                            <Typography>{restaurant.name}</Typography>
-                            {pending && (
-                              <Chip 
-                                size="small" 
-                                label={pending.services.length + ' srv - $' + pending.totalUSD.toFixed(2)}
-                                color="warning"
-                                variant="outlined"
-                              />
-                            )}
-                          </Stack>
-                        </MenuItem>
-                      )
-                    })
-                  : drivers.map((driver) => {
-                      const pending = pendingByDriver[driver.id]
-                      return (
-                        <MenuItem key={driver.id} value={driver.id}>
-                          <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                            <Typography>{driver.name}</Typography>
-                            {pending && (
-                              <Chip 
-                                size="small" 
-                                label={pending.services.length + ' srv - $' + pending.totalUSD.toFixed(2)}
-                                color="success"
-                                variant="outlined"
-                              />
-                            )}
-                          </Stack>
-                        </MenuItem>
-                      )
-                    })
-                }
-              </Select>
-            </FormControl>
-            
-            <FormControl fullWidth required>
-              <InputLabel>Semana *</InputLabel>
-              <Select
-                value={createDialog.weekId}
-                label="Semana *"
-                onChange={(e) => setCreateDialog(prev => ({ ...prev, weekId: e.target.value }))}
-                disabled={saving}
-              >
-                {availableWeeks.map((week) => (
-                  <MenuItem key={week.id} value={week.id}>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <CalendarIcon fontSize="small" />
-                      <Typography variant="body2">{week.label}</Typography>
-                      {week.isCurrent && (
-                        <Chip label="Actual" size="small" color="primary" sx={{ ml: 1, height: 20 }} />
-                      )}
-                    </Stack>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            
-            {createDialog.entityId && createDialog.weekId && (
-              <Paper sx={{ p: 2, bgcolor: createDialog.type === 'restaurante' ? 'warning.light' : 'success.light', borderRadius: 2 }}>
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                  {createDialog.type === 'restaurante' ? <CobrarIcon color="warning" /> : <PagarIcon color="success" />}
-                  <Typography variant="subtitle2" fontWeight="bold">
-                    {createDialog.type === 'restaurante' ? 'Resumen de Cobro' : 'Resumen de Pago'}
-                  </Typography>
-                </Stack>
-                
-                {(() => {
-                  const weekServices = getEntityServicesForWeek(
-                    createDialog.type,
-                    createDialog.entityId,
-                    createDialog.weekId
-                  )
-                  
-                  const totalUSD = createDialog.type === 'restaurante'
-                    ? weekServices.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-                    : weekServices.reduce((sum, s) => sum + (s.driverEarnings || 0), 0)
-                  const totalVES = totalUSD * exchangeRate.rate
-                  const actionText = createDialog.type === 'restaurante' ? 'Cobrar' : 'Pagar'
-                  const actionColor = createDialog.type === 'restaurante' ? 'warning' : 'success'
-                  
-                  return (
-                    <Grid container spacing={1}>
-                      <Grid item xs={6}>
-                        <Typography variant="caption" color="text.secondary">Servicios en la semana</Typography>
-                        <Typography variant="body1" fontWeight="bold">{weekServices.length}</Typography>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Typography variant="caption" color="text.secondary">Monto USD</Typography>
-                        <Typography variant="body1" fontWeight="bold" color={actionColor + '.main'}>${totalUSD.toFixed(2)}</Typography>
-                      </Grid>
-                      {exchangeRate.rate > 0 && (
-                        <>
-                          <Grid item xs={12}>
-                            <Typography variant="caption" color="text.secondary">
-                              Tasa: {formatRate(exchangeRate.rate)} Bs.
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12}>
-                            <Typography variant="caption" color="text.secondary">
-                              Equivalente en Bs
-                            </Typography>
-                            <Typography variant="body1" fontWeight="bold">{formatVES(totalVES)}</Typography>
-                          </Grid>
-                        </>
-                      )}
-                      <Grid item xs={12}>
-                        <Chip 
-                          size="small"
-                          icon={createDialog.type === 'restaurante' ? <CobrarIcon /> : <PagarIcon />}
-                          label={'Accion: ' + actionText}
-                          color={actionColor}
-                          sx={{ mt: 1 }}
-                        />
-                      </Grid>
-                      {weekServices.length === 0 && (
-                        <Grid item xs={12}>
-                          <Typography variant="body2" color="error.main" sx={{ mt: 1 }}>
-                            No hay servicios pendientes de {actionText.toLowerCase()} en la semana seleccionada
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Puede que ya se hayan liquidado estos servicios o no hay servicios en este rango de fechas.
-                          </Typography>
-                        </Grid>
-                      )}
-                    </Grid>
-                  )
-                })()}
-              </Paper>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button 
-            onClick={() => setCreateDialog({ open: false, type: 'restaurante', entityId: '', weekId: '', serviceIds: [] })}
-            disabled={saving}
-          >
-            Cancelar
-          </Button>
-          <Button 
-            variant="contained" 
-            onClick={handleCreateSettlement}
-            disabled={saving}
-            startIcon={saving ? <CircularProgress size={16} /> : (createDialog.type === 'restaurante' ? <CobrarIcon /> : <PagarIcon />)}
-            color={createDialog.type === 'restaurante' ? 'warning' : 'success'}
-          >
-            {saving ? 'Creando...' : (createDialog.type === 'restaurante' ? 'Crear Cobro' : 'Crear Pago')}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={payDialog.open}
-        onClose={() => setPayDialog({ open: false, settlement: null })}
-      >
-        <DialogTitle>
-          Confirmar {payDialog.settlement?.type === 'restaurante' ? 'Cobro' : 'Pago'}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2}>
-            <Typography>
-              {payDialog.settlement?.type === 'restaurante' 
-                ? 'Confirmas que el restaurante ha realizado el pago?'
-                : 'Confirmas que se ha realizado el pago al repartidor?'}
-            </Typography>
-            
-            {payDialog.settlement && (
+          {confirmDialog.settlement && (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Typography>
+                {confirmDialog.settlement.type === 'restaurante' 
+                  ? '¿Confirmas que el restaurante ha realizado el pago?'
+                  : '¿Confirmas que se ha realizado el pago al repartidor?'}
+              </Typography>
+              
               <Paper sx={{ p: 2, bgcolor: 'grey.100' }}>
                 <Grid container spacing={2}>
                   <Grid item xs={6}>
                     <Typography variant="caption" color="text.secondary">
-                      {payDialog.settlement.type === 'restaurante' ? 'Restaurante:' : 'Repartidor:'}
+                      {confirmDialog.settlement.type === 'restaurante' ? 'Restaurante' : 'Repartidor'}
                     </Typography>
                     <Typography variant="body2" fontWeight="bold">
-                      {payDialog.settlement.restaurantName || payDialog.settlement.driverName}
+                      {confirmDialog.settlement.restaurantName || confirmDialog.settlement.driverName}
                     </Typography>
                   </Grid>
                   <Grid item xs={6}>
-                    <Typography variant="caption" color="text.secondary">Monto USD:</Typography>
+                    <Typography variant="caption" color="text.secondary">Servicios</Typography>
+                    <Typography variant="body2">{confirmDialog.settlement.serviceCount}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Monto USD</Typography>
                     <Typography variant="body2" fontWeight="bold" color="success.main">
-                      ${(payDialog.settlement.amount || 0).toFixed(2)}
+                      ${(confirmDialog.settlement.amount || 0).toFixed(2)}
                     </Typography>
                   </Grid>
-                  {payDialog.settlement.amountVES && (
-                    <Grid item xs={12}>
-                      <Typography variant="caption" color="text.secondary">Equivalente Bs:</Typography>
-                      <Typography variant="body2" fontWeight="bold">{formatVES(payDialog.settlement.amountVES)}</Typography>
-                    </Grid>
-                  )}
-                  {payDialog.settlement.exchangeRate && (
-                    <Grid item xs={12}>
-                      <Typography variant="caption" color="text.secondary">Tasa aplicada:</Typography>
-                      <Typography variant="body2">{formatRate(payDialog.settlement.exchangeRate)} Bs.</Typography>
-                    </Grid>
-                  )}
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Equivalente Bs</Typography>
+                    <Typography variant="body2" fontWeight="bold">
+                      {formatVES(confirmDialog.settlement.amountVES)}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="caption" color="text.secondary">
+                      Tasa aplicada: {confirmDialog.settlement.exchangeRate?.toFixed(2) || '--'} Bs/$                     </Typography>
+                  </Grid>
                 </Grid>
               </Paper>
-            )}
-          </Stack>
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setPayDialog({ open: false, settlement: null })}>
+          <Button onClick={() => setConfirmDialog({ open: false, settlement: null })}>
             Cancelar
           </Button>
           <Button 
             variant="contained" 
-            color={payDialog.settlement?.type === 'restaurante' ? 'warning' : 'success'}
-            startIcon={payDialog.settlement?.type === 'restaurante' ? <CobrarIcon /> : <PagarIcon />}
-            onClick={handlePaySettlement}
+            color={confirmDialog.settlement?.type === 'restaurante' ? 'warning' : 'success'}
+            onClick={handleConfirmSettlement}
           >
-            Confirmar {payDialog.settlement?.type === 'restaurante' ? 'Cobro' : 'Pago'}
+            Confirmar {confirmDialog.settlement?.type === 'restaurante' ? 'Cobro' : 'Pago'}
           </Button>
         </DialogActions>
       </Dialog>
 
+      {/* Footer */}
       <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
           <Box
@@ -1001,7 +990,7 @@ export default function AdminLiquidaciones() {
           </Typography>
         </Box>
         <Typography variant="caption" color="text.secondary" display="block">
-          C {currentYear} Copyright. Desarrollado por Erick Simosa
+          © {currentYear} Copyright. Desarrollado por Erick Simosa
         </Typography>
         <Typography variant="caption" color="text.secondary">
           ericksimosa@gmail.com - 0424 3036024

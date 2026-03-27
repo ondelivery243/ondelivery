@@ -1,5 +1,5 @@
 // src/pages/admin/Reportes.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { 
   Box, 
   Card, 
@@ -12,7 +12,8 @@ import {
   useTheme,
   useMediaQuery,
   Chip,
-  alpha
+  alpha,
+  LinearProgress
 } from '@mui/material'
 import {
   Inventory as PackageIcon,
@@ -20,79 +21,159 @@ import {
   Store as StoreIcon,
   TwoWheeler as BikeIcon,
   TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon
+  CalendarToday as CalendarIcon
 } from '@mui/icons-material'
 import { formatCurrency } from '../../store/useStore'
 import { 
-  getDashboardStats,
-  getServices,
-  getRestaurants,
-  getDrivers
+  subscribeToServices,
+  subscribeToRestaurants,
+  subscribeToDrivers
 } from '../../services/firestore'
 import { RIDERY_COLORS } from '../../theme/theme'
+
+// ============================================
+// FUNCIONES AUXILIARES FUERA DEL COMPONENTE
+// ============================================
+
+// Obtener el lunes de la semana actual
+const getMondayOfWeek = (date) => {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  const monday = new Date(d.setDate(diff))
+  monday.setHours(0, 0, 0, 0)
+  return monday
+}
+
+// Obtener el primer día del mes
+const getFirstDayOfMonth = (date) => {
+  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0)
+}
+
+// Obtener inicio del día actual
+const getStartOfToday = () => {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+}
+
+// Formatear rango de semana
+const formatWeekRange = () => {
+  const monday = getMondayOfWeek(new Date())
+  const sunday = new Date(monday)
+  sunday.setDate(sunday.getDate() + 6)
+  const options = { day: 'numeric', month: 'short' }
+  return `${monday.toLocaleDateString('es-VE', options)} - ${sunday.toLocaleDateString('es-VE', options)}`
+}
 
 export default function Reportes() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   
+  const [services, setServices] = useState([])
+  const [restaurants, setRestaurants] = useState([])
+  const [drivers, setDrivers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState(null)
-  const [topRestaurants, setTopRestaurants] = useState([])
-  const [topDrivers, setTopDrivers] = useState([])
-  const [weeklyData, setWeeklyData] = useState([])
   const currentYear = new Date().getFullYear()
 
+  // ✅ SUSCRIPCIONES EN TIEMPO REAL
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true)
-      
-      try {
-        // Cargar estadísticas generales
-        const statsData = await getDashboardStats()
-        setStats(statsData)
-        
-        // Cargar servicios para análisis
-        const services = await getServices()
-        
-        // Calcular datos de la semana (Lunes a Domingo)
-        const weekData = calculateWeeklyData(services)
-        setWeeklyData(weekData)
-        
-        // Cargar restaurantes y calcular top
-        const restaurants = await getRestaurants()
-        const restaurantStats = calculateRestaurantStats(services, restaurants)
-        setTopRestaurants(restaurantStats.slice(0, 5))
-        
-        // Cargar repartidores y calcular top
-        const drivers = await getDrivers()
-        const driverStats = calculateDriverStats(services, drivers)
-        setTopDrivers(driverStats.slice(0, 5))
-      } catch (error) {
-        console.error('Error cargando datos de reportes:', error)
-      }
-      
-      setLoading(false)
-    }
+    setLoading(true)
     
-    loadData()
+    const unsubServices = subscribeToServices((data) => {
+      setServices(data)
+      setLoading(false)
+    })
+    
+    const unsubRestaurants = subscribeToRestaurants((data) => {
+      setRestaurants(data)
+    })
+    
+    const unsubDrivers = subscribeToDrivers((data) => {
+      setDrivers(data)
+    })
+    
+    return () => {
+      unsubServices()
+      unsubRestaurants()
+      unsubDrivers()
+    }
   }, [])
 
-  // Calcular datos de la última semana (ordenado Lunes a Domingo)
-  const calculateWeeklyData = (services) => {
-    // Días ordenados de Lunes a Domingo
+  // ✅ ESTADÍSTICAS GENERALES - useMemo para tiempo real
+  const stats = useMemo(() => {
+    const now = new Date()
+    const startOfMonth = getFirstDayOfMonth(now)
+    const startOfToday = getStartOfToday()
+    const startOfWeek = getMondayOfWeek(now)
+    
+    // Servicios entregados
+    const deliveredServices = services.filter(s => s.status === 'entregado')
+    
+    // Servicios del mes actual
+    const monthlyServices = deliveredServices.filter(s => {
+      const createdAt = s.createdAt?.toDate?.()
+      return createdAt && createdAt >= startOfMonth
+    })
+    
+    // ✅ Servicios de la semana actual (desde el lunes)
+    const weeklyServices = deliveredServices.filter(s => {
+      const createdAt = s.createdAt?.toDate?.()
+      return createdAt && createdAt >= startOfWeek
+    })
+    
+    // Servicios de hoy
+    const todayServices = services.filter(s => {
+      const createdAt = s.createdAt?.toDate?.()
+      return createdAt && createdAt >= startOfToday
+    })
+    
+    // ✅ Ingresos del mes (comisiones de la plataforma)
+    const monthlyRevenue = monthlyServices.reduce((sum, s) => sum + (s.platformFee || 0), 0)
+    
+    // ✅ Ingresos de la semana actual
+    const weeklyRevenue = weeklyServices.reduce((sum, s) => sum + (s.platformFee || 0), 0)
+    
+    // Servicios completados hoy
+    const completedToday = todayServices.filter(s => s.status === 'entregado').length
+    
+    // Servicios pendientes
+    const pendingServices = services.filter(s => 
+      s.status === 'pendiente' || s.status === 'sin_repartidor'
+    ).length
+    
+    // Servicios en proceso
+    const inProgressServices = services.filter(s => 
+      s.status === 'asignado' || s.status === 'en_camino'
+    ).length
+    
+    // Restaurantes activos
+    const activeRestaurants = restaurants.filter(r => r.active).length
+    
+    // Repartidores activos
+    const activeDrivers = drivers.filter(d => d.active).length
+    
+    return {
+      totalServices: deliveredServices.length,
+      monthlyRevenue,
+      weeklyRevenue,
+      weeklyServicesCount: weeklyServices.length,
+      activeRestaurants,
+      activeDrivers,
+      pendingServices,
+      inProgressServices,
+      completedToday,
+      servicesToday: todayServices.length
+    }
+  }, [services, restaurants, drivers])
+
+  // ✅ DATOS SEMANALES - useMemo para tiempo real
+  const weeklyData = useMemo(() => {
     const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
     const today = new Date()
-    
-    // Encontrar el lunes de esta semana
-    const currentDay = today.getDay() // 0 = Domingo, 1 = Lunes, etc.
-    const daysToMonday = currentDay === 0 ? -6 : 1 - currentDay
-    const mondayOfWeek = new Date(today)
-    mondayOfWeek.setDate(today.getDate() + daysToMonday)
-    mondayOfWeek.setHours(0, 0, 0, 0)
+    const mondayOfWeek = getMondayOfWeek(today)
     
     const weekData = []
     
-    // Generar datos de Lunes a Domingo
     for (let i = 0; i < 7; i++) {
       const date = new Date(mondayOfWeek)
       date.setDate(mondayOfWeek.getDate() + i)
@@ -120,10 +201,10 @@ export default function Reportes() {
     }
     
     return weekData
-  }
+  }, [services])
 
-  // Calcular estadísticas por restaurante
-  const calculateRestaurantStats = (services, restaurants) => {
+  // ✅ TOP RESTAURANTES - useMemo para tiempo real
+  const topRestaurants = useMemo(() => {
     const statsMap = {}
     
     services.forEach(service => {
@@ -139,11 +220,11 @@ export default function Reportes() {
       }
     })
     
-    return Object.values(statsMap).sort((a, b) => b.services - a.services)
-  }
+    return Object.values(statsMap).sort((a, b) => b.services - a.services).slice(0, 5)
+  }, [services])
 
-  // Calcular estadísticas por repartidor
-  const calculateDriverStats = (services, drivers) => {
+  // ✅ TOP REPARTIDORES - useMemo para tiempo real
+  const topDrivers = useMemo(() => {
     const statsMap = {}
     
     services.forEach(service => {
@@ -159,9 +240,18 @@ export default function Reportes() {
       }
     })
     
-    return Object.values(statsMap).sort((a, b) => b.services - a.services)
-  }
+    return Object.values(statsMap).sort((a, b) => b.services - a.services).slice(0, 5)
+  }, [services])
 
+  // ✅ TOTALES DE LA SEMANA
+  const weekTotals = useMemo(() => {
+    return weeklyData.reduce((acc, day) => ({
+      services: acc.services + day.servicios,
+      ingresos: acc.ingresos + day.ingresos
+    }), { services: 0, ingresos: 0 })
+  }, [weeklyData])
+
+  // ✅ TARJETAS DE ESTADÍSTICAS (5 tarjetas ahora)
   const statsCards = [
     { 
       title: 'Servicios Totales', 
@@ -176,6 +266,12 @@ export default function Reportes() {
       bgColor: '#10B981'
     },
     { 
+      title: 'Ingresos de la Semana', 
+      value: formatCurrency(stats?.weeklyRevenue || 0), 
+      icon: TrendingUpIcon, 
+      bgColor: '#8B5CF6'
+    },
+    { 
       title: 'Restaurantes Activos', 
       value: stats?.activeRestaurants || 0, 
       icon: StoreIcon, 
@@ -188,15 +284,11 @@ export default function Reportes() {
       bgColor: '#F59E0B'
     },
   ]
-  
-  // Calcular totales de la semana
-  const weekTotals = weeklyData.reduce((acc, day) => ({
-    services: acc.services + day.servicios,
-    ingresos: acc.ingresos + day.ingresos
-  }), { services: 0, ingresos: 0 })
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {loading && <LinearProgress />}
+      
       {/* Header */}
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Box>
@@ -209,10 +301,10 @@ export default function Reportes() {
         </Box>
       </Stack>
 
-      {/* Stats Cards */}
+      {/* Stats Cards - 5 tarjetas */}
       <Grid container spacing={{ xs: 2, sm: 3 }}>
         {statsCards.map((stat, index) => (
-          <Grid item xs={6} md={3} key={index}>
+          <Grid item xs={6} sm={4} md={2.4} key={index}>
             <Card sx={{ height: '100%' }}>
               <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
                 {loading ? (
@@ -249,6 +341,27 @@ export default function Reportes() {
           </Grid>
         ))}
       </Grid>
+
+      {/* Tarjeta Semana Actual */}
+      <Card sx={{ 
+        background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`,
+        color: 'white'
+      }}>
+        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+            <CalendarIcon />
+            <Typography variant="subtitle1" fontWeight="bold">
+              Semana Actual
+            </Typography>
+          </Stack>
+          <Typography variant="h6" fontWeight="medium">
+            {formatWeekRange()}
+          </Typography>
+          <Typography variant="body2" sx={{ opacity: 0.8, mt: 0.5 }}>
+            Se reinicia cada lunes • {stats?.weeklyServicesCount || 0} servicios entregados
+          </Typography>
+        </CardContent>
+      </Card>
 
       {/* Weekly Report - Ordenado Lunes a Domingo */}
       <Card>

@@ -27,10 +27,15 @@ export function formatDate(date) {
 export function formatTime(date) {
   if (!date) return ''
   const d = date?.toDate?.() || new Date(date)
-  return d.toLocaleTimeString('es-VE', {
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+  
+  let hours = d.getHours()
+  const minutes = d.getMinutes().toString().padStart(2, '0')
+  const ampm = hours >= 12 ? 'p. m.' : 'a. m.'
+  
+  hours = hours % 12
+  hours = hours ? hours : 12 // 0 se convierte en 12
+  
+  return `${hours}:${minutes} ${ampm}`
 }
 
 export function formatDateTime(date) {
@@ -57,6 +62,9 @@ export const useStore = create((set, get) => ({
   
   // Setters
   setUser: (user) => set({ user, loading: false }),
+  updateUserData: (userData) => set((state) => ({
+    user: state.user ? { ...state.user, ...userData } : userData
+  })),
   setRestaurants: (restaurants) => set({ restaurants }),
   setDrivers: (drivers) => set({ drivers }),
   setZones: (zones) => set({ zones }),

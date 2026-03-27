@@ -1,5 +1,5 @@
 // src/pages/admin/Restaurantes.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { alpha } from '@mui/material/styles'
 import {
   Box,
@@ -78,7 +78,9 @@ export default function AdminRestaurantes() {
     active: true
   })
 
-  // Cargar datos
+  // ============================================
+  // SUSCRIPCIÓN EN TIEMPO REAL
+  // ============================================
   useEffect(() => {
     setLoading(true)
     const unsubscribe = subscribeToRestaurants((data) => {
@@ -88,20 +90,44 @@ export default function AdminRestaurantes() {
     return () => unsubscribe()
   }, [])
 
-  // Filtrar restaurantes
-  const filteredRestaurants = restaurants.filter(restaurant => {
-    return !searchTerm || 
-      restaurant.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      restaurant.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  // ============================================
+  // ESTADÍSTICAS CALCULADAS (OPTIMIZADO)
+  // ============================================
+  const stats = useMemo(() => ({
+    total: restaurants.length,
+    active: restaurants.filter(r => r.active).length,
+    pending: restaurants.filter(r => !r.active).length,
+    withServices: restaurants.filter(r => r.totalServices > 0).length
+  }), [restaurants])
+
+  // ============================================
+  // FILTRADO (OPTIMIZADO)
+  // ============================================
+  const filteredRestaurants = useMemo(() => {
+    if (!searchTerm) return restaurants
+    
+    const term = searchTerm.toLowerCase()
+    return restaurants.filter(restaurant => 
+      restaurant.name?.toLowerCase().includes(term) ||
+      restaurant.email?.toLowerCase().includes(term) ||
       restaurant.phone?.includes(searchTerm)
-  })
+    )
+  }, [restaurants, searchTerm])
 
-  // Paginación
-  const paginatedRestaurants = filteredRestaurants.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
-  )
+  // ============================================
+  // PAGINACIÓN
+  // ============================================
+  const paginatedRestaurants = useMemo(() => {
+    return filteredRestaurants.slice(
+      page * rowsPerPage,
+      page * rowsPerPage + rowsPerPage
+    )
+  }, [filteredRestaurants, page, rowsPerPage])
 
+  // ============================================
+  // HANDLERS
+  // ============================================
+  
   // Abrir diálogo de edición
   const handleOpenEdit = (restaurant) => {
     setFormData({
@@ -173,9 +199,11 @@ export default function AdminRestaurantes() {
     setSelectedRestaurant(null)
   }
 
-  // Estadísticas
-  const activeCount = restaurants.filter(r => r.active).length
-  const pendingCount = restaurants.filter(r => !r.active).length
+  // Resetear página cuando cambia el filtro
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value)
+    setPage(0)
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -202,7 +230,7 @@ export default function AdminRestaurantes() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="primary">
-                {restaurants.length}
+                {stats.total}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Total
@@ -214,7 +242,7 @@ export default function AdminRestaurantes() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="success.main">
-                {activeCount}
+                {stats.active}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Activos
@@ -226,7 +254,7 @@ export default function AdminRestaurantes() {
           <Card sx={{ borderRadius: 2, bgcolor: 'warning.light' }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold" color="warning.dark">
-                {pendingCount}
+                {stats.pending}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Pendientes
@@ -238,7 +266,7 @@ export default function AdminRestaurantes() {
           <Card sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {restaurants.filter(r => r.totalServices > 0).length}
+                {stats.withServices}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Con servicios
@@ -249,9 +277,9 @@ export default function AdminRestaurantes() {
       </Grid>
 
       {/* Alert para pendientes */}
-      {pendingCount > 0 && (
+      {stats.pending > 0 && (
         <Alert severity="warning" icon={<PendingIcon />}>
-          Hay <strong>{pendingCount} restaurante(s)</strong> pendientes de activación. 
+          Hay <strong>{stats.pending} restaurante(s)</strong> pendientes de activación. 
           Revisa sus datos y actívalos para que puedan iniciar sesión.
         </Alert>
       )}
@@ -262,7 +290,7 @@ export default function AdminRestaurantes() {
         size="small"
         placeholder="Buscar por nombre, email o teléfono..."
         value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
+        onChange={handleSearchChange}
         InputProps={{
           startAdornment: (
             <InputAdornment position="start">
@@ -286,7 +314,15 @@ export default function AdminRestaurantes() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {paginatedRestaurants.length === 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Cargando...
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedRestaurants.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
                     <StoreIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
@@ -391,7 +427,7 @@ export default function AdminRestaurantes() {
           <EditIcon sx={{ mr: 1, fontSize: 20 }} />
           Editar
         </MenuItem>
-        <MenuItem onClick={() => handleToggleActive(selectedRestaurant)}>
+        <MenuItem onClick={() => { handleToggleActive(selectedRestaurant); handleMenuClose(); }}>
           {selectedRestaurant?.active ? (
             <>
               <CancelIcon sx={{ mr: 1, fontSize: 20 }} />

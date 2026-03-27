@@ -1,16 +1,17 @@
-// src/pages/restaurante/Historial.jsx
+// src/pages/admin/Historial.jsx
 import { useState, useEffect, useMemo } from 'react'
 import {
   Box,
   Card,
   CardContent,
   Typography,
-  Grid,
-  Chip,
-  Stack,
-  Paper,
   TextField,
   InputAdornment,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Button,
   Table,
   TableBody,
   TableCell,
@@ -18,76 +19,38 @@ import {
   TableHead,
   TableRow,
   TablePagination,
-  useTheme,
-  useMediaQuery,
-  alpha,
-  LinearProgress,
-  Button,
+  Chip,
+  IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  Grid,
+  Paper,
   Divider,
-  IconButton,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem
+  Stack
 } from '@mui/material'
 import {
   Search as SearchIcon,
-  Inventory as PackageIcon,
-  Check as CheckIcon,
-  Cancel as CancelIcon,
-  Schedule as PendingIcon,
-  TwoWheeler as BikeIcon,
-  LocationOn as LocationIcon,
-  AttachMoney as MoneyIcon,
-  Phone as PhoneIcon,
-  Person as PersonIcon,
-  AccessTime as TimeIcon,
   FilterList as FilterIcon,
   GetApp as DownloadIcon,
   Visibility as ViewIcon,
   Close as CloseIcon,
-  LocalShipping as ShippingIcon
+  TwoWheeler as BikeIcon,
+  Restaurant as RestaurantIcon,
+  Person as PersonIcon,
+  AccessTime as TimeIcon,
+  Phone as PhoneIcon,
+  LocationOn as LocationIcon,
+  Check as CheckIcon,
+  Cancel as CancelIcon,
+  Schedule as PendingIcon,
+  LocalShipping as ShippingIcon,
+  AttachMoney as MoneyIcon
 } from '@mui/icons-material'
-import { useRestaurantStore, useStore } from '../../store/useStore'
-import { subscribeToRestaurantServices, getRestaurantByUserId, getRestaurant } from '../../services/firestore'
-import { RIDERY_COLORS } from '../../theme/theme'
+import { useSnackbar } from 'notistack'
+import { subscribeToServices, subscribeToRestaurants, subscribeToDrivers } from '../../services/firestore'
 import { format } from 'date-fns'
-
-// ============================================
-// 📅 FUNCIONES DE MANEJO SEMANAL
-// ============================================
-
-const getMonday = (date) => {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-  return new Date(d.setDate(diff))
-}
-
-const getSunday = (monday) => {
-  const d = new Date(monday)
-  d.setDate(d.getDate() + 6)
-  return d
-}
-
-const formatWeekRange = (monday) => {
-  const sunday = getSunday(monday)
-  const options = { day: '2-digit', month: 'short' }
-  return monday.toLocaleDateString('es-VE', options) + ' - ' + sunday.toLocaleDateString('es-VE', options)
-}
-
-const getCurrentWeekId = () => {
-  const monday = getMonday(new Date())
-  return monday.toISOString().split('T')[0]
-}
-
-// ============================================
-// 📊 CONFIGURACIÓN DE ESTADOS
-// ============================================
 
 const STATUS_CONFIG = {
   pendiente: { label: 'Pendiente', color: 'warning', icon: PendingIcon },
@@ -98,79 +61,66 @@ const STATUS_CONFIG = {
   sin_repartidor: { label: 'Sin repartidor', color: 'error', icon: CancelIcon }
 }
 
-export default function RestauranteHistorial() {
-  const theme = useTheme()
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
-  const { restaurantData, setRestaurantData } = useRestaurantStore()
-  const { user } = useStore()
+export default function AdminHistorial() {
+  const { enqueueSnackbar } = useSnackbar()
   
+  // Data
   const [services, setServices] = useState([])
+  const [restaurants, setRestaurants] = useState([])
+  const [drivers, setDrivers] = useState([])
   const [loading, setLoading] = useState(true)
   
-  // Filtros
+  // Filters
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [restaurantFilter, setRestaurantFilter] = useState('')
+  const [driverFilter, setDriverFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   
-  // Paginación
+  // Pagination
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   
-  // Modal detalle
+  // Detail modal
   const [selectedService, setSelectedService] = useState(null)
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   
-  const currentYear = new Date().getFullYear()
-  const currentWeekId = getCurrentWeekId()
-
-  // Cargar datos del restaurante y suscribirse a servicios - TIEMPO REAL
+  // Load data
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true)
-      
-      let restaurant = restaurantData
-      if (!restaurant && user) {
-        if (user.restaurantId) {
-          restaurant = await getRestaurant(user.restaurantId)
-        } else {
-          restaurant = await getRestaurantByUserId(user.uid)
-        }
-        if (restaurant) {
-          setRestaurantData(restaurant)
-        }
-      }
-      
-      if (restaurant?.id) {
-        // Suscripción en tiempo real a servicios del restaurante
-        const unsubServices = subscribeToRestaurantServices(restaurant.id, (servicesData) => {
-          setServices(servicesData)
-          setLoading(false)
-        })
-        
-        return () => {
-          unsubServices()
-        }
-      } else {
-        setLoading(false)
-      }
-    }
+    setLoading(true)
     
-    loadData()
-  }, [restaurantData, setRestaurantData, user])
-
-  // ============================================
-  // 📝 FUNCIONES DE FORMATO
-  // ============================================
+    const unsubServices = subscribeToServices((data) => {
+      setServices(data)
+      setLoading(false)
+    })
+    
+    const unsubRestaurants = subscribeToRestaurants((data) => {
+      setRestaurants(data)
+    })
+    
+    const unsubDrivers = subscribeToDrivers((data) => {
+      setDrivers(data)
+    })
+    
+    return () => {
+      unsubServices()
+      unsubRestaurants()
+      unsubDrivers()
+    }
+  }, [])
   
-  // Formato de moneda sin "RD" duplicado
-  const formatCurrency = (amount) => {
-    if (amount === undefined || amount === null || isNaN(amount)) return '$0.00'
-    return new Intl.NumberFormat('es-DO', {
-      style: 'currency',
-      currency: 'DOP',
-      minimumFractionDigits: 2
-    }).format(amount).replace('RD$', '$')
+  // Helper functions
+  const getRestaurantName = (restaurantId) => {
+    if (!restaurantId) return 'N/A'
+    const restaurant = restaurants.find(r => r.id === restaurantId)
+    return restaurant?.name || 'N/A'
+  }
+  
+  const getDriverName = (driverId) => {
+    if (!driverId) return 'Sin asignar'
+    const driver = drivers.find(d => d.id === driverId)
+    return driver?.name || 'N/A'
   }
   
   // Formato de fecha: 27/03/2026 12:59 p. m.
@@ -195,36 +145,44 @@ export default function RestauranteHistorial() {
       return 'N/A'
     }
   }
-
-  // ============================================
-  // 📊 ESTADÍSTICAS Y FILTRADO
-  // ============================================
   
-  // Servicios filtrados
+  // Formato de moneda sin "RD" duplicado
+  const formatCurrency = (amount) => {
+    if (amount === undefined || amount === null || isNaN(amount)) return '$0.00'
+    return new Intl.NumberFormat('es-DO', {
+      style: 'currency',
+      currency: 'DOP',
+      minimumFractionDigits: 2
+    }).format(amount).replace('RD$', '$')
+  }
+  
+  // Filtered services
   const filteredServices = useMemo(() => {
     return services.filter(service => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
-        const serviceId = service.serviceId?.toLowerCase() || ''
+        const restaurantName = getRestaurantName(service.restaurantId)?.toLowerCase() || ''
+        const driverName = getDriverName(service.driverId)?.toLowerCase() || ''
         const clientName = service.clientName?.toLowerCase() || ''
+        const serviceId = service.serviceId?.toLowerCase() || ''
         const phone = service.clientPhone?.toLowerCase() || ''
         const address = service.deliveryAddress?.toLowerCase() || ''
-        const zone = service.zoneName?.toLowerCase() || ''
-        const driverName = service.driverName?.toLowerCase() || ''
         
         const matchesSearch = 
-          serviceId.includes(query) ||
+          restaurantName.includes(query) || 
+          driverName.includes(query) || 
           clientName.includes(query) ||
+          serviceId.includes(query) ||
           phone.includes(query) ||
-          address.includes(query) ||
-          zone.includes(query) ||
-          driverName.includes(query)
+          address.includes(query)
         
         if (!matchesSearch) return false
       }
       
       if (statusFilter && service.status !== statusFilter) return false
+      if (restaurantFilter && service.restaurantId !== restaurantFilter) return false
+      if (driverFilter && service.driverId !== driverFilter) return false
       
       if (dateFrom) {
         const serviceDate = new Date(service.createdAt?.seconds * 1000 || service.createdAt)
@@ -246,46 +204,23 @@ export default function RestauranteHistorial() {
       const dateB = new Date(b.createdAt?.seconds * 1000 || b.createdAt)
       return dateB - dateA
     })
-  }, [services, searchQuery, statusFilter, dateFrom, dateTo])
+  }, [services, searchQuery, statusFilter, restaurantFilter, driverFilter, dateFrom, dateTo])
   
-  // Estadísticas
+  // Stats - con ganancia de repartidor
   const stats = useMemo(() => {
-    const delivered = filteredServices.filter(s => s.status === 'entregado')
-    const totalFees = delivered.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-    
-    // Semana actual
-    const monday = new Date(currentWeekId)
-    monday.setHours(0, 0, 0, 0)
-    const sunday = getSunday(monday)
-    sunday.setHours(23, 59, 59, 999)
-    
-    const weekServices = services.filter(s => {
-      const isDelivered = s.status === 'entregado'
-      const createdAt = s.createdAt?.seconds ? new Date(s.createdAt.seconds * 1000) : new Date(s.createdAt)
-      return isDelivered && createdAt >= monday && createdAt <= sunday
-    })
-    
-    const weekTotal = weekServices.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
-    
-    // Todos los tiempos
-    const allTimeDelivered = services.filter(s => s.status === 'entregado')
-    const allTimeTotal = allTimeDelivered.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+    const completed = filteredServices.filter(s => s.status === 'entregado')
+    const totalDeliveryFees = filteredServices.reduce((sum, s) => sum + (s.deliveryFee || 0), 0)
+    const totalDriverEarnings = filteredServices.reduce((sum, s) => sum + (s.driverEarnings || 0), 0)
     
     return {
       total: filteredServices.length,
-      delivered: delivered.length,
-      totalFees,
-      weekServices: weekServices.length,
-      weekTotal,
-      allTimeServices: allTimeDelivered.length,
-      allTimeTotal
+      completed: completed.length,
+      totalDeliveryFees,
+      totalDriverEarnings
     }
-  }, [filteredServices, services, currentWeekId])
-
-  // ============================================
-  // 🔧 HANDLERS
-  // ============================================
+  }, [filteredServices])
   
+  // Handlers
   const handleViewDetail = (service) => {
     setSelectedService(service)
     setDetailModalOpen(true)
@@ -294,42 +229,6 @@ export default function RestauranteHistorial() {
   const handleCloseDetail = () => {
     setDetailModalOpen(false)
     setSelectedService(null)
-  }
-  
-  const handleClearFilters = () => {
-    setSearchQuery('')
-    setStatusFilter('')
-    setDateFrom('')
-    setDateTo('')
-    setPage(0)
-  }
-  
-  const handleExportCSV = () => {
-    if (filteredServices.length === 0) return
-    
-    const headers = ['ID', 'Fecha', 'Zona', 'Cliente', 'Teléfono', 'Dirección', 'Repartidor', 'Estado', 'Tarifa Delivery']
-    const rows = filteredServices.map(s => [
-      s.serviceId || s.id,
-      formatDateTime(s.createdAt),
-      s.zoneName || 'N/A',
-      s.clientName || 'N/A',
-      s.clientPhone || 'N/A',
-      s.deliveryAddress || 'N/A',
-      s.driverName || 'Sin asignar',
-      STATUS_CONFIG[s.status]?.label || s.status,
-      s.deliveryFee || 0
-    ])
-    
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n')
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `mis_servicios_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`
-    link.click()
   }
   
   const handleChangePage = (event, newPage) => {
@@ -341,41 +240,55 @@ export default function RestauranteHistorial() {
     setPage(0)
   }
   
-  // Servicios paginados
+  const handleClearFilters = () => {
+    setSearchQuery('')
+    setStatusFilter('')
+    setRestaurantFilter('')
+    setDriverFilter('')
+    setDateFrom('')
+    setDateTo('')
+    setPage(0)
+  }
+  
+  const handleExportCSV = () => {
+    if (filteredServices.length === 0) {
+      enqueueSnackbar('No hay datos para exportar', { variant: 'warning' })
+      return
+    }
+    
+    const headers = ['ID', 'Fecha', 'Restaurante', 'Repartidor', 'Cliente', 'Teléfono', 'Estado', 'Ganancia Repartidor', 'Tarifa Delivery']
+    const rows = filteredServices.map(s => [
+      s.serviceId || s.id,
+      formatDateTime(s.createdAt),
+      getRestaurantName(s.restaurantId),
+      getDriverName(s.driverId),
+      s.clientName || 'N/A',
+      s.clientPhone || 'N/A',
+      STATUS_CONFIG[s.status]?.label || s.status,
+      s.driverEarnings || 0,
+      s.deliveryFee || 0
+    ])
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n')
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `historial_servicios_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`
+    link.click()
+    
+    enqueueSnackbar('Archivo CSV descargado', { variant: 'success' })
+  }
+  
+  // Paginated data
   const paginatedServices = filteredServices.slice(
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
   )
-
-  // ============================================
-  // 🎨 RENDER
-  // ============================================
   
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <LinearProgress />
-        <Typography variant="body2" color="text.secondary">Cargando historial...</Typography>
-      </Box>
-    )
-  }
-
-  if (!restaurantData) {
-    return (
-      <Card sx={{ borderRadius: 2 }}>
-        <CardContent sx={{ p: 4, textAlign: 'center' }}>
-          <PackageIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No hay datos del restaurante
-          </Typography>
-          <Typography variant="body2" color="text.disabled">
-            Si acabas de registrarte, espera a que un administrador active tu cuenta.
-          </Typography>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Header */}
@@ -385,7 +298,7 @@ export default function RestauranteHistorial() {
             Historial de Servicios
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Consulta todos tus servicios realizados
+            Consulta y filtra todos los servicios del sistema
           </Typography>
         </Box>
         
@@ -398,7 +311,7 @@ export default function RestauranteHistorial() {
           Exportar CSV
         </Button>
       </Box>
-
+      
       {/* Quick Stats - 4 tarjetas */}
       <Grid container spacing={2}>
         <Grid item xs={6} sm={3}>
@@ -420,19 +333,19 @@ export default function RestauranteHistorial() {
                 Entregados
               </Typography>
               <Typography variant="h4" fontWeight="bold" color="success.main" sx={{ mt: 0.5 }}>
-                {stats.delivered}
+                {stats.completed}
               </Typography>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={6} sm={3}>
-          <Card elevation={0} sx={{ bgcolor: '#dbeafe', height: '100%' }}>
+          <Card elevation={0} sx={{ bgcolor: '#e0e7ff', height: '100%' }}>
             <CardContent sx={{ py: 2, textAlign: 'center' }}>
               <Typography variant="body2" color="text.secondary" fontWeight="medium">
-                Esta Semana
+                Ganancia Repartidores
               </Typography>
               <Typography variant="h4" fontWeight="bold" color="primary.main" sx={{ mt: 0.5 }}>
-                {formatCurrency(stats.weekTotal)}
+                {formatCurrency(stats.totalDriverEarnings)}
               </Typography>
             </CardContent>
           </Card>
@@ -441,39 +354,17 @@ export default function RestauranteHistorial() {
           <Card elevation={0} sx={{ bgcolor: '#fef3c7', height: '100%' }}>
             <CardContent sx={{ py: 2, textAlign: 'center' }}>
               <Typography variant="body2" color="text.secondary" fontWeight="medium">
-                Total Histórico
+                Tarifas Delivery
               </Typography>
               <Typography variant="h4" fontWeight="bold" color="warning.main" sx={{ mt: 0.5 }}>
-                {formatCurrency(stats.allTimeTotal)}
+                {formatCurrency(stats.totalDeliveryFees)}
               </Typography>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
       
-      {/* Semana actual */}
-      <Card elevation={0} sx={{ bgcolor: alpha(theme.palette.primary.main, 0.05) }}>
-        <CardContent sx={{ py: 1.5 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Box>
-              <Typography variant="caption" color="text.secondary">
-                Semana Actual
-              </Typography>
-              <Typography variant="body2" fontWeight="bold" color="primary.main">
-                {formatWeekRange(getMonday(new Date()))}
-              </Typography>
-            </Box>
-            <Chip 
-              icon={<PackageIcon />} 
-              label={`${stats.weekServices} servicios`} 
-              color="primary" 
-              size="small" 
-            />
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {/* Filters */}
+      {/* Filters - distribuidos en filas completas */}
       <Card elevation={0}>
         <CardContent sx={{ py: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
@@ -483,13 +374,13 @@ export default function RestauranteHistorial() {
             </Typography>
           </Box>
           
-          {/* Fila 1: Búsqueda */}
+          {/* Fila 1: Búsqueda completa */}
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12}>
               <TextField
                 fullWidth
                 size="small"
-                placeholder="Buscar por ID, cliente, teléfono, dirección o repartidor..."
+                placeholder="Buscar por ID, restaurante, cliente, teléfono o dirección..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 InputProps={{
@@ -503,8 +394,8 @@ export default function RestauranteHistorial() {
             </Grid>
           </Grid>
           
-          {/* Fila 2: Estado y Fechas */}
-          <Grid container spacing={2} alignItems="center">
+          {/* Fila 2: Filtros desplegables */}
+          <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel id="status-label">Estado</InputLabel>
@@ -521,6 +412,42 @@ export default function RestauranteHistorial() {
                 </Select>
               </FormControl>
             </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="restaurant-label">Restaurante</InputLabel>
+                <Select
+                  labelId="restaurant-label"
+                  value={restaurantFilter}
+                  onChange={(e) => setRestaurantFilter(e.target.value)}
+                  label="Restaurante"
+                >
+                  <MenuItem value="">Todos los restaurantes</MenuItem>
+                  {restaurants.map((r) => (
+                    <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="driver-label">Repartidor</InputLabel>
+                <Select
+                  labelId="driver-label"
+                  value={driverFilter}
+                  onChange={(e) => setDriverFilter(e.target.value)}
+                  label="Repartidor"
+                >
+                  <MenuItem value="">Todos los repartidores</MenuItem>
+                  {drivers.filter(d => d.active).map((d) => (
+                    <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+          </Grid>
+          
+          {/* Fila 3: Fechas y botón limpiar */}
+          <Grid container spacing={2} alignItems="center">
             <Grid item xs={6} sm={3}>
               <TextField
                 fullWidth
@@ -543,20 +470,20 @@ export default function RestauranteHistorial() {
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>
-            <Grid item xs={12} sm={2}>
+            <Grid item xs={12} sm={3}>
               <Button
                 fullWidth
                 variant="outlined"
                 onClick={handleClearFilters}
                 sx={{ height: 40 }}
               >
-                Limpiar
+                Limpiar filtros
               </Button>
             </Grid>
           </Grid>
         </CardContent>
       </Card>
-
+      
       {/* Table */}
       <Card elevation={0}>
         <TableContainer>
@@ -565,18 +492,25 @@ export default function RestauranteHistorial() {
               <TableRow>
                 <TableCell sx={{ fontWeight: 'bold' }}>ID</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Fecha</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Zona</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Cliente</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Restaurante</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Repartidor</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Cliente</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Estado</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }} align="right">Ganancia Rep.</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }} align="right">Tarifa</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }} align="center">Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {paginatedServices.length === 0 ? (
+              {loading ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                    <Typography color="text.secondary">Cargando...</Typography>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedServices.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                     <Typography color="text.secondary">
                       No se encontraron servicios con los filtros seleccionados
                     </Typography>
@@ -601,7 +535,12 @@ export default function RestauranteHistorial() {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {service.zoneName || 'N/A'}
+                          {getRestaurantName(service.restaurantId)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {getDriverName(service.driverId)}
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -610,21 +549,21 @@ export default function RestauranteHistorial() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">
-                          {service.driverName || 'Sin asignar'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
                         <Chip
                           size="small"
                           label={statusConfig.label || service.status}
                           color={statusConfig.color || 'default'}
                           icon={<StatusIcon sx={{ fontSize: 16 }} />}
-                          sx={{ minWidth: 90 }}
+                          sx={{ minWidth: 100 }}
                         />
                       </TableCell>
                       <TableCell align="right">
-                        <Typography variant="body2" fontWeight="medium" color="success.main">
+                        <Typography variant="body2" fontWeight="medium" color="primary.main">
+                          {formatCurrency(service.driverEarnings)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography variant="body2" color="text.secondary">
                           {formatCurrency(service.deliveryFee)}
                         </Typography>
                       </TableCell>
@@ -659,7 +598,7 @@ export default function RestauranteHistorial() {
           }
         />
       </Card>
-
+      
       {/* Detail Modal */}
       <Dialog
         open={detailModalOpen}
@@ -703,7 +642,7 @@ export default function RestauranteHistorial() {
                 />
               </Box>
               
-              {/* Info Grid */}
+              {/* Info Grid - 2x2 bien alineado */}
               <Grid container spacing={2} sx={{ mb: 3 }}>
                 <Grid item xs={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
@@ -724,13 +663,13 @@ export default function RestauranteHistorial() {
                 <Grid item xs={6}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
                     <Stack direction="row" spacing={1.5} alignItems="flex-start">
-                      <LocationIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
+                      <RestaurantIcon color="primary" fontSize="small" sx={{ mt: 0.5 }} />
                       <Box sx={{ flex: 1 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight="medium">
-                          Zona
+                          Restaurante
                         </Typography>
                         <Typography variant="body1" fontWeight="medium" noWrap>
-                          {selectedService.zoneName || 'N/A'}
+                          {getRestaurantName(selectedService.restaurantId)}
                         </Typography>
                       </Box>
                     </Stack>
@@ -746,7 +685,7 @@ export default function RestauranteHistorial() {
                           Repartidor
                         </Typography>
                         <Typography variant="body1" fontWeight="medium" noWrap>
-                          {selectedService.driverName || 'Sin asignar'}
+                          {getDriverName(selectedService.driverId)}
                         </Typography>
                       </Box>
                     </Stack>
@@ -797,6 +736,20 @@ export default function RestauranteHistorial() {
                 </Stack>
               </Paper>
               
+              {/* Zone Info */}
+              {selectedService.zoneName && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
+                    Zona de Entrega
+                  </Typography>
+                  <Chip 
+                    icon={<LocationIcon />}
+                    label={selectedService.zoneName} 
+                    variant="outlined"
+                  />
+                </Box>
+              )}
+              
               {/* Notes */}
               {selectedService.notes && (
                 <Box sx={{ mb: 3 }}>
@@ -845,8 +798,17 @@ export default function RestauranteHistorial() {
                     <Typography variant="body2" color="text.secondary">
                       Tarifa de Delivery
                     </Typography>
-                    <Typography variant="body1" fontWeight="medium" color="success.main">
+                    <Typography variant="body1">
                       {formatCurrency(selectedService.deliveryFee)}
+                    </Typography>
+                  </Stack>
+                  
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="body2" color="text.secondary">
+                      Ganancia Repartidor
+                    </Typography>
+                    <Typography variant="body1" fontWeight="medium" color="primary.main">
+                      {formatCurrency(selectedService.driverEarnings)}
                     </Typography>
                   </Stack>
                   
@@ -885,36 +847,6 @@ export default function RestauranteHistorial() {
           </>
         )}
       </Dialog>
-
-      {/* Footer */}
-      <Box sx={{ mt: 2, py: 3, textAlign: 'center' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-          <Box
-            component="img"
-            src="/logo-192.png"
-            alt="ON Delivery"
-            sx={{ width: 28, height: 28, borderRadius: 1 }}
-          />
-          <Typography
-            variant="subtitle2"
-            fontWeight="bold"
-            sx={{
-              background: RIDERY_COLORS.gradientPrimary,
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent'
-            }}
-          >
-            ON Delivery
-          </Typography>
-        </Box>
-        <Typography variant="caption" color="text.secondary" display="block">
-          © {currentYear} Copyright. Desarrollado por Erick Simosa
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          ericksimosa@gmail.com - 0424 3036024
-        </Typography>
-      </Box>
     </Box>
   )
 }

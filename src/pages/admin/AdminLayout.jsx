@@ -27,6 +27,7 @@ import {
   Inventory as PackageIcon,
   AttachMoney as MoneyIcon,
   Assessment as ReportIcon,
+  History as HistoryIcon,
   Settings as SettingsIcon,
   Logout as LogoutIcon,
   Menu as MenuIcon
@@ -147,6 +148,12 @@ export default function AdminLayout() {
       label: 'Reportes', 
       icon: ReportIcon, 
       path: '/admin/reportes' 
+    },
+    { 
+      id: 'historial', 
+      label: 'Historial', 
+      icon: HistoryIcon, 
+      path: '/admin/historial' 
     },
     { 
       id: 'configuracion', 

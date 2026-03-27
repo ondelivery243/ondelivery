@@ -41,6 +41,10 @@ export const getZones = async () => {
     const snapshot = await getDocs(collection(db, ZONES_COLLECTION))
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return []
+    }
     console.error('Error obteniendo zonas:', error)
     return []
   }
@@ -102,6 +106,10 @@ export const getRestaurants = async () => {
     const snapshot = await getDocs(q)
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return []
+    }
     console.error('Error obteniendo restaurantes:', error)
     return []
   }
@@ -115,6 +123,10 @@ export const getRestaurant = async (restaurantId) => {
     }
     return null
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo restaurante:', error)
     return null
   }
@@ -215,6 +227,10 @@ export const getDrivers = async () => {
     const snapshot = await getDocs(q)
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return []
+    }
     console.error('Error obteniendo repartidores:', error)
     return []
   }
@@ -228,6 +244,10 @@ export const getDriver = async (driverId) => {
     }
     return null
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo repartidor:', error)
     return null
   }
@@ -373,6 +393,10 @@ export const getServices = async (filters = {}) => {
     const snapshot = await getDocs(q)
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return []
+    }
     console.error('Error obteniendo servicios:', error)
     return []
   }
@@ -386,6 +410,10 @@ export const getService = async (serviceId) => {
     }
     return null
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo servicio:', error)
     return null
   }
@@ -784,6 +812,10 @@ export const getSettlements = async (filters = {}) => {
     const snapshot = await getDocs(q)
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return []
+    }
     console.error('Error obteniendo liquidaciones:', error)
     return []
   }
@@ -904,6 +936,10 @@ export const getDashboardStats = async () => {
       todayRevenue
     }
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo estadísticas:', error)
     return null
   }
@@ -943,6 +979,10 @@ export const getRestaurantStats = async (restaurantId) => {
       totalServices: services.length
     }
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo estadísticas del restaurante:', error)
     return null
   }
@@ -988,6 +1028,10 @@ export const getDriverStats = async (driverId) => {
       rating: services[0]?.driverRating || 5.0
     }
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo estadísticas del repartidor:', error)
     return null
   }
@@ -1007,6 +1051,10 @@ export const getSettings = async () => {
     }
     return null
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo configuración:', error)
     return null
   }
@@ -1037,6 +1085,10 @@ export const getUser = async (userId) => {
     }
     return null
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return null
+    }
     console.error('Error obteniendo usuario:', error)
     return null
   }
@@ -1076,6 +1128,10 @@ export const getExchangeRate = async () => {
     }
     return { rate: 0, lastUpdate: null, previousRate: 0, fechaValor: null }
   } catch (error) {
+    // Silenciar errores de permisos (normal al hacer logout)
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      return { rate: 0, lastUpdate: null, previousRate: 0, fechaValor: null }
+    }
     console.error('Error obteniendo tasa de cambio:', error)
     return { rate: 0, lastUpdate: null, previousRate: 0, fechaValor: null }
   }

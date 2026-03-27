@@ -34,6 +34,7 @@ import AdminZonas from './pages/admin/Zonas'
 import AdminServicios from './pages/admin/Servicios'
 import AdminLiquidaciones from './pages/admin/Liquidaciones'
 import AdminReportes from './pages/admin/Reportes'
+import AdminHistorial from './pages/admin/Historial'
 import AdminConfiguracion from './pages/admin/Configuracion'
 
 // Restaurante Pages
@@ -181,6 +182,7 @@ function App() {
               <Route path="servicios" element={<AdminServicios />} />
               <Route path="liquidaciones" element={<AdminLiquidaciones />} />
               <Route path="reportes" element={<AdminReportes />} />
+              <Route path="historial" element={<AdminHistorial />} />
               <Route path="configuracion" element={<AdminConfiguracion />} />
             </Route>
             
