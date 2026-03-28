@@ -133,6 +133,7 @@ export const sendMessage = async (serviceId, senderId, senderName, senderRole, m
 
 /**
  * Suscribe a los mensajes del chat en tiempo real
+ * ✅ CORREGIDO: Usa la función unsubscribe específica en lugar de off()
  */
 export const subscribeToMessages = (serviceId, callback) => {
   const chatId = getChatId(serviceId)
@@ -140,6 +141,7 @@ export const subscribeToMessages = (serviceId, callback) => {
   
   console.log('🔔 Suscribiendo a mensajes:', chatId)
   
+  // onValue devuelve una función unsubscribe específica para este listener
   const unsubscribe = onValue(messagesRef, (snapshot) => {
     const messages = []
     snapshot.forEach((child) => {
@@ -153,14 +155,16 @@ export const subscribeToMessages = (serviceId, callback) => {
     callback([])
   })
   
+  // ✅ Retornar la función unsubscribe directamente (NO usar off)
   return () => {
     console.log('🚫 Desuscribiendo de mensajes:', chatId)
-    off(messagesRef)
+    unsubscribe() // Esto solo elimina ESTE listener específico
   }
 }
 
 /**
  * Suscribe a la información del chat (metadata)
+ * ✅ CORREGIDO: Usa la función unsubscribe específica en lugar de off()
  */
 export const subscribeToChatRoom = (serviceId, callback) => {
   const chatId = getChatId(serviceId)
@@ -168,6 +172,7 @@ export const subscribeToChatRoom = (serviceId, callback) => {
   
   console.log('🔔 Suscribiendo a chat room:', chatId)
   
+  // onValue devuelve una función unsubscribe específica para este listener
   const unsubscribe = onValue(chatRef, (snapshot) => {
     if (snapshot.exists()) {
       callback({ id: chatId, ...snapshot.val() })
@@ -179,9 +184,10 @@ export const subscribeToChatRoom = (serviceId, callback) => {
     callback(null)
   })
   
+  // ✅ Retornar la función unsubscribe directamente (NO usar off)
   return () => {
     console.log('🚫 Desuscribiendo de chat room:', chatId)
-    off(chatRef)
+    unsubscribe() // Esto solo elimina ESTE listener específico
   }
 }
 
@@ -279,7 +285,7 @@ export const subscribeToUserChats = (userId, role, callback) => {
     callback([])
   })
   
-  return () => off(chatsRef)
+  return unsubscribe
 }
 
 /**

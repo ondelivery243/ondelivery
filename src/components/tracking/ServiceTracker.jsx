@@ -361,12 +361,53 @@ const ServiceTracker = ({
                 <Box>
                   <Typography variant="caption" color="text.secondary">Pago</Typography>
                   <Typography variant="body2">
-                    {service.paymentMethod === 'efectivo' ? 'Efectivo' : 
+                    {service.paymentMethod === 'efectivo' ? 'Efectivo' :
                      service.paymentMethod === 'transferencia' ? 'Transferencia' : 'Pagado'}
                   </Typography>
                 </Box>
               )}
             </Stack>
+          )}
+
+          {/* Información detallada de pago */}
+          {service.paymentMethod === 'pagado' && (
+            <Paper sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.info.main, 0.1), border: 1, borderColor: 'info.main' }}>
+              <Typography variant="body2" fontWeight="medium" color="info.dark">
+                ✅ Cliente ya pagó - Solo entregar pedido
+              </Typography>
+              <Typography variant="caption" color="info.dark">
+                El repartidor NO debe cobrar nada al cliente
+              </Typography>
+            </Paper>
+          )}
+
+          {service.paymentMethod === 'efectivo' && service.paysWith > 0 && service.paysWith === service.amountToCollect && (
+            <Paper sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.success.main, 0.1), border: 1, borderColor: 'success.main' }}>
+              <Typography variant="body2" fontWeight="medium" color="success.dark">
+                ✅ Pago exacto - No requiere cambio
+              </Typography>
+              <Typography variant="caption" color="success.dark">
+                El cliente pagará ${service.amountToCollect?.toFixed(2) || '0.00'} exacto
+              </Typography>
+            </Paper>
+          )}
+
+          {service.paymentMethod === 'efectivo' && service.changeAmount > 0 && (
+            <Paper sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.warning.main, 0.1), border: 1, borderColor: 'warning.main' }}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="body1" fontWeight="bold" color="warning.dark">
+                  💵 Cambio a llevar: ${service.changeAmount.toFixed(2)}
+                </Typography>
+              </Stack>
+              <Typography variant="caption" color="warning.dark" sx={{ mt: 0.5, display: 'block' }}>
+                💡 El repartidor debe pedir este monto al restaurante
+              </Typography>
+              <Box sx={{ mt: 0.5, pt: 0.5, borderTop: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary">
+                  Cliente paga: ${service.paysWith?.toFixed(2) || '0.00'} • A cobrar: ${service.amountToCollect?.toFixed(2) || '0.00'}
+                </Typography>
+              </Box>
+            </Paper>
           )}
         </Stack>
       </CardContent>

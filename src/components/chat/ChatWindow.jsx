@@ -40,9 +40,15 @@ import {
   createChatRoom,
   getChatRoom
 } from '../../services/chatService'
+import { playChatMessageSound } from '../../services/audioService'
 
 /**
  * ChatWindow - Componente de chat en tiempo real
+ * 
+ * ✅ CORREGIDO: 
+ * - Evita bucle infinito de suscripciones
+ * - Detecta correctamente mensajes nuevos
+ * - Reproduce sonido con chat abierto
  */
 export default function ChatWindow({
   service,
@@ -64,14 +70,29 @@ export default function ChatWindow({
   const [sending, setSending] = useState(false)
   const [chatRoom, setChatRoom] = useState(null)
   
+  // ============================================
+  // 🔒 REFS
+  // ============================================
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const messagesContainerRef = useRef(null)
-  const isSubscribedRef = useRef(false)
-  const isInitializedRef = useRef(false)
-  const markingAsReadRef = useRef(false)
+  
+  // Tracking de suscripciones activas
+  const activeSubscriptionsRef = useRef({
+    messages: null,
+    chatRoom: null
+  })
+  
+  // Tracking del servicio actual
+  const currentServiceIdRef = useRef(null)
+  
+  // 🔧 CORREGIDO: Tracking del último mensaje usando timestamp + ID
+  const lastProcessedMessageRef = useRef({ id: null, timestamp: 0 })
+  
+  // Flag para saber si ya se cargaron los mensajes iniciales
+  const initialLoadDoneRef = useRef(false)
 
-  // Usar valores primitivos estables
+  // Valores primitivos estables
   const serviceId = service?.id
   const currentUserId = currentUser?.id
   const currentUserName = currentUser?.name
@@ -84,98 +105,180 @@ export default function ChatWindow({
     }
   }, [])
 
-  // 🔄 Inicializar chat room SOLO UNA VEZ
+  // ============================================
+  // 🔄 INICIALIZACIÓN Y SUSCRIPCIÓN PRINCIPAL
+  // ============================================
   useEffect(() => {
-    if (!serviceId || !currentUserId || !currentUserRole) return
+    // Validaciones iniciales
+    if (!serviceId || !currentUserId || !currentUserRole) {
+      console.log('⚠️ [ChatWindow] Faltan datos requeridos:', { serviceId, currentUserId, currentUserRole })
+      return
+    }
 
-    if (isInitializedRef.current) return
-    isInitializedRef.current = true
+    // 🚨 CRÍTICO: Solo inicializar si cambió el serviceId
+    if (currentServiceIdRef.current === serviceId) {
+      console.log('✅ [ChatWindow] Ya suscrito a servicio:', serviceId)
+      return
+    }
 
+    console.log('🚀 [ChatWindow] Inicializando chat para servicio:', serviceId)
+    
+    // Limpiar suscripciones anteriores
+    if (activeSubscriptionsRef.current.messages) {
+      console.log('🧹 [ChatWindow] Limpiando suscripción de mensajes anterior')
+      activeSubscriptionsRef.current.messages()
+      activeSubscriptionsRef.current.messages = null
+    }
+    if (activeSubscriptionsRef.current.chatRoom) {
+      console.log('🧹 [ChatWindow] Limpiando suscripción de chatRoom anterior')
+      activeSubscriptionsRef.current.chatRoom()
+      activeSubscriptionsRef.current.chatRoom = null
+    }
+
+    // Actualizar el servicio actual
+    currentServiceIdRef.current = serviceId
+    lastProcessedMessageRef.current = { id: null, timestamp: 0 }
+    initialLoadDoneRef.current = false
+    setLoading(true)
+
+    // Inicializar chat room
     const initChat = async () => {
-      console.log('🚀 ChatWindow: Inicializando chat para servicio:', serviceId)
-      setLoading(true)
-      
-      let existingChat = await getChatRoom(serviceId)
-      
-      if (!existingChat) {
-        const result = await createChatRoom(
-          serviceId,
-          service,
-          currentUserRole === 'restaurant' ? { name: currentUserName } : null,
-          currentUserRole === 'driver' ? { id: currentUserId, name: currentUserName } : null
-        )
+      try {
+        let existingChat = await getChatRoom(serviceId)
         
-        if (result.success) {
-          existingChat = await getChatRoom(serviceId)
+        if (!existingChat) {
+          const result = await createChatRoom(
+            serviceId,
+            service,
+            currentUserRole === 'restaurant' ? { name: currentUserName } : null,
+            currentUserRole === 'driver' ? { id: currentUserId, name: currentUserName } : null
+          )
+          
+          if (result.success) {
+            existingChat = await getChatRoom(serviceId)
+          }
         }
+        
+        setChatRoom(existingChat)
+        console.log('✅ [ChatWindow] Chat room inicializado:', existingChat?.id)
+      } catch (error) {
+        console.error('❌ [ChatWindow] Error inicializando chat:', error)
       }
       
-      setChatRoom(existingChat)
       setLoading(false)
     }
     
     initChat()
-  // ✅ Corregido: Usar dependencias primitivas estables
-  }, [serviceId, currentUserId, currentUserName, currentUserRole])
 
-  // 📨 Suscribirse a mensajes
-  useEffect(() => {
-    if (!serviceId) return
-
-    if (isSubscribedRef.current) return
-    isSubscribedRef.current = true
-
-    const unsubscribe = subscribeToMessages(serviceId, (msgs) => {
+    // ============================================
+    // 📨 SUSCRIPCIÓN A MENSAJES
+    // ============================================
+    console.log('🔔 [ChatWindow] Suscribiendo a mensajes:', serviceId)
+    
+    const unsubMessages = subscribeToMessages(serviceId, (msgs) => {
+      // Detectar si hay mensajes nuevos del otro participante
+      if (msgs.length > 0) {
+        const lastMessage = msgs[msgs.length - 1]
+        const isFromOther = lastMessage.senderRole !== currentUserRole
+        
+        // 🔧 CORREGIDO: Detectar mensaje realmente nuevo
+        const isNewMessage = lastMessage.id !== lastProcessedMessageRef.current.id &&
+                            lastMessage.timestamp > lastProcessedMessageRef.current.timestamp
+        
+        console.log('📨 [ChatWindow] Mensaje recibido:', {
+          id: lastMessage.id,
+          timestamp: lastMessage.timestamp,
+          senderRole: lastMessage.senderRole,
+          isFromOther,
+          isNewMessage,
+          initialLoadDone: initialLoadDoneRef.current,
+          lastProcessed: lastProcessedMessageRef.current
+        })
+        
+        // 🔊 Reproducir sonido cuando:
+        // 1. Ya se hizo la carga inicial
+        // 2. El mensaje es del otro participante
+        // 3. Es un mensaje nuevo (no procesado antes)
+        // 4. El chat está abierto
+        if (initialLoadDoneRef.current && isFromOther && isNewMessage && open) {
+          console.log('🔊 [ChatWindow] 🔔 NUEVO MENSAJE con chat abierto - reproduciendo sonido')
+          playChatMessageSound()
+        }
+        
+        // Actualizar referencia del último mensaje procesado
+        lastProcessedMessageRef.current = {
+          id: lastMessage.id,
+          timestamp: lastMessage.timestamp
+        }
+        
+        // Marcar que ya se hizo la carga inicial
+        if (!initialLoadDoneRef.current) {
+          initialLoadDoneRef.current = true
+          console.log('✅ [ChatWindow] Carga inicial completada')
+        }
+      }
+      
       setMessages(msgs)
       setLoading(false)
+      
+      // Scroll al final después de recibir mensajes
       setTimeout(scrollToBottom, 100)
     })
 
-    return () => {
-      isSubscribedRef.current = false
-      unsubscribe()
-    }
-  }, [serviceId, scrollToBottom])
+    activeSubscriptionsRef.current.messages = unsubMessages
 
-  // 📋 Suscribirse a cambios del chat room
-  useEffect(() => {
-    if (!serviceId || !currentUserRole) return
-
-    const unsubscribe = subscribeToChatRoom(serviceId, (room) => {
+    // ============================================
+    // 📋 SUSCRIPCIÓN AL CHAT ROOM
+    // ============================================
+    console.log('🔔 [ChatWindow] Suscribiendo a chat room:', serviceId)
+    
+    const unsubChatRoom = subscribeToChatRoom(serviceId, (room) => {
+      console.log('📋 [ChatWindow] Chat room actualizado:', room?.id)
       setChatRoom(room)
     })
 
-    return () => unsubscribe()
-  }, [serviceId, currentUserRole])
+    activeSubscriptionsRef.current.chatRoom = unsubChatRoom
 
-  // Marcar mensajes como leídos cuando el chat está abierto
-  useEffect(() => {
-    const markAsRead = async () => {
-      if (open && serviceId && currentUserRole && messages.length > 0 && !markingAsReadRef.current) {
-        markingAsReadRef.current = true
-        await markMessagesAsRead(serviceId, currentUserRole)
-        setTimeout(() => { markingAsReadRef.current = false }, 500)
+    // Cleanup
+    return () => {
+      console.log('🧹 [ChatWindow] Cleanup - desmontando componente')
+      
+      if (activeSubscriptionsRef.current.messages) {
+        activeSubscriptionsRef.current.messages()
+        activeSubscriptionsRef.current.messages = null
       }
+      if (activeSubscriptionsRef.current.chatRoom) {
+        activeSubscriptionsRef.current.chatRoom()
+        activeSubscriptionsRef.current.chatRoom = null
+      }
+      
+      currentServiceIdRef.current = null
+      initialLoadDoneRef.current = false
     }
-    
-    markAsRead()
+  }, [serviceId, currentUserId, currentUserName, currentUserRole, open, scrollToBottom])
+
+  // ============================================
+  // ✅ MARCAR MENSAJES COMO LEÍDOS
+  // ============================================
+  useEffect(() => {
+    if (open && serviceId && currentUserRole && messages.length > 0) {
+      console.log('📖 [ChatWindow] Marcando mensajes como leídos')
+      markMessagesAsRead(serviceId, currentUserRole)
+        .then(() => console.log('✅ [ChatWindow] Mensajes marcados como leídos'))
+        .catch(err => console.error('❌ [ChatWindow] Error marcando leídos:', err))
+    }
   }, [open, serviceId, currentUserRole, messages.length])
 
-  // Scroll inicial
+  // Scroll inicial cuando cargan los mensajes
   useEffect(() => {
-    if (!loading && messages.length > 0) scrollToBottom()
+    if (!loading && messages.length > 0) {
+      scrollToBottom()
+    }
   }, [loading, messages.length, scrollToBottom])
 
-  // Resetear cuando se cierra
-  useEffect(() => {
-    if (!open) {
-      isInitializedRef.current = false
-      isSubscribedRef.current = false
-      markingAsReadRef.current = false
-    }
-  }, [open])
-
-  // Enviar mensaje
+  // ============================================
+  // 📤 ENVIAR MENSAJE
+  // ============================================
   const handleSendMessage = async () => {
     if (!newMessage.trim() || sending || !serviceId || !currentUserId || !currentUserName || !currentUserRole) return
     
@@ -183,21 +286,26 @@ export default function ChatWindow({
     const messageText = newMessage.trim()
     setNewMessage('')
     
-    const result = await sendMessage(
-      serviceId,
-      currentUserId,
-      currentUserName,
-      currentUserRole,
-      messageText
-    )
-    
-    setSending(false)
-    
-    if (!result.success) {
+    try {
+      const result = await sendMessage(
+        serviceId,
+        currentUserId,
+        currentUserName,
+        currentUserRole,
+        messageText
+      )
+      
+      if (!result.success) {
+        enqueueSnackbar('Error al enviar mensaje', { variant: 'error' })
+        setNewMessage(messageText)
+      }
+    } catch (error) {
+      console.error('Error enviando mensaje:', error)
       enqueueSnackbar('Error al enviar mensaje', { variant: 'error' })
       setNewMessage(messageText)
     }
     
+    setSending(false)
     inputRef.current?.focus()
   }
 
@@ -216,7 +324,9 @@ export default function ChatWindow({
 
   if (!open) return null
 
-  // Modo mini
+  // ============================================
+  // 📱 MODO MINI (FLOTANTE)
+  // ============================================
   if (miniMode) {
     return (
       <Slide direction="up" in={open} mountOnEnter unmountOnExit>
@@ -352,7 +462,9 @@ export default function ChatWindow({
     )
   }
 
-  // Modo completo
+  // ============================================
+  // 📋 MODO COMPLETO
+  // ============================================
   return (
     <Paper
       elevation={0}

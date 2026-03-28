@@ -6,116 +6,149 @@ import {
   Tooltip,
   Fab,
   useTheme,
-  useMediaQuery,
-  Box,
-  Typography
+  useMediaQuery
 } from '@mui/material'
 import {
   Chat as ChatIcon,
   Close as CloseIcon
 } from '@mui/icons-material'
 import ChatWindow from './ChatWindow'
-import { subscribeToChatRoom, markMessagesAsRead } from '../../services/chatService'
+import { markMessagesAsRead, subscribeToChatRoom } from '../../services/chatService'
+import { playChatMessageSound } from '../../services/audioService'
 
 /**
  * ChatButton - Botón flotante para abrir el chat
- * NOTA: El sonido se maneja globalmente en el Dashboard
+ *
+ * ✅ Características:
+ * - Badge con contador de no leídos
+ * - 🔊 Reproduce sonido cuando llega mensaje con chat cerrado (si no hay hook externo)
+ * - Marca mensajes como leídos al abrir
+ * - Abre ChatWindow al hacer clic
+ *
+ * NOTA: El sonido con chat cerrado se maneja en:
+ * - useChatNotifications (para el repartidor en Dashboard)
+ * - RestaurantChatManager (para el restaurante)
+ * Este componente tiene su propia lógica de sonido como backup
  */
 export default function ChatButton({
   service,
   currentUser,
   otherParty,
+  unreadCount = 0,
   variant = 'fab',
-  forceShowPulse = false, // ✅ NUEVA PROP para forzar animación desde el padre
   onChatOpen,
   onChatClose,
-  size = 'medium'
+  size = 'medium',
+  disableSound = false  // Desactivar sonido si se maneja externamente
 }) {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
-  
-  const [chatOpen, setChatOpen] = useState(false)
-  const [unreadCount, setUnreadCount] = useState(0)
-  const [showNotification, setShowNotification] = useState(false)
-  const [lastMessagePreview, setLastMessagePreview] = useState('')
-  
-  // Refs
-  const prevUnreadCountRef = useRef(-1)
-  const chatOpenRef = useRef(chatOpen)
-  const subscriptionKeyRef = useRef(null)
-  
-  const serviceId = service?.id
-  const currentUserId = currentUser?.id
-  const currentUserRole = currentUser?.role
 
-  // Mantener ref actualizado
+  const [chatOpen, setChatOpen] = useState(false)
+
+  // ============================================
+  // 🔒 REFS PARA EVITAR BUCLES Y MANTENER SUSCRIPCIÓN
+  // ============================================
+  const subscriptionRef = useRef(null)
+  const lastUnreadRef = useRef(-1)
+  const serviceIdRef = useRef(null)
+  const chatOpenRef = useRef(false)  // 🔧 Usar ref para chatOpen
+
+  // Mantener chatOpenRef actualizado
   useEffect(() => {
     chatOpenRef.current = chatOpen
   }, [chatOpen])
 
-  // 🔔 Suscribirse al chat room
-  useEffect(() => {
-    if (!serviceId || !currentUserId || !currentUserRole) return
+  const serviceId = service?.id
+  const currentUserId = currentUser?.id
+  const currentUserRole = currentUser?.role
 
-    const subscriptionKey = `${serviceId}-${currentUserId}-${currentUserRole}`
-    if (subscriptionKeyRef.current === subscriptionKey) return
-    subscriptionKeyRef.current = subscriptionKey
+  // ============================================
+  // 🔔 SUSCRIPCIÓN PARA SONIDO CON CHAT CERRADO
+  // Solo si disableSound es false
+  // ============================================
+  useEffect(() => {
+    // Si el sonido está desactivado, no crear suscripción
+    if (disableSound || !serviceId || !currentUserRole) return
+
+    // Solo suscribir si cambió el servicio
+    if (serviceIdRef.current === serviceId) return
+    serviceIdRef.current = serviceId
+
+    // Limpiar suscripción anterior
+    if (subscriptionRef.current) {
+      subscriptionRef.current()
+      subscriptionRef.current = null
+    }
+
+    // Resetear el último unread para este nuevo servicio
+    lastUnreadRef.current = -1
+
+    console.log('🔔 [ChatButton] Suscribiendo a chat room para sonido:', serviceId)
 
     const unsubscribe = subscribeToChatRoom(serviceId, (room) => {
-      if (room) {
-        const count = currentUserRole === 'restaurant' 
-          ? (room.unreadByRestaurant || 0)
-          : (room.unreadByDriver || 0)
-        
-        // Detectar nuevos mensajes para mostrar preview local
-        if (count > 0 && prevUnreadCountRef.current >= 0 && count > prevUnreadCountRef.current && !chatOpenRef.current) {
-          setLastMessagePreview(room.lastMessage || 'Nuevo mensaje')
-          setShowNotification(true)
-          
-          if (navigator.vibrate) {
-            navigator.vibrate([200, 100, 200])
-          }
-        }
-        
-        prevUnreadCountRef.current = count
-        setUnreadCount(count)
+      if (!room) return
+
+      // Obtener contador según rol
+      const currentUnread = currentUserRole === 'restaurant'
+        ? (room.unreadByRestaurant || 0)
+        : (room.unreadByDriver || 0)
+
+      const prevUnread = lastUnreadRef.current
+
+      console.log('📊 [ChatButton] Unread check:', {
+        serviceId,
+        currentUnread,
+        prevUnread,
+        chatOpen: chatOpenRef.current
+      })
+
+      // 🔊 Detectar incremento de mensajes no leídos
+      // Solo reproducir sonido si:
+      // 1. Ya habíamos recibido al menos una actualización (prevUnread >= 0)
+      // 2. El contador aumentó
+      // 3. El chat está cerrado (usar ref)
+      if (prevUnread >= 0 && currentUnread > prevUnread && !chatOpenRef.current) {
+        console.log('🔊 [ChatButton] Nuevo mensaje con chat cerrado - reproduciendo sonido')
+        playChatMessageSound()
       }
+
+      lastUnreadRef.current = currentUnread
     })
 
-    return () => {
-      subscriptionKeyRef.current = null
-      unsubscribe()
-    }
-  }, [serviceId, currentUserId, currentUserRole])
+    subscriptionRef.current = unsubscribe
 
-  // ✅ MARCAR LEÍDOS AL ABRIR
+    return () => {
+      if (subscriptionRef.current) {
+        console.log('🧹 [ChatButton] Limpiando suscripción - componente desmontado')
+        subscriptionRef.current()
+        subscriptionRef.current = null
+      }
+    }
+  }, [disableSound, serviceId, currentUserRole])
+
+  // Marcar como leídos al abrir chat
   useEffect(() => {
     if (chatOpen && serviceId && currentUserRole) {
-      prevUnreadCountRef.current = 0
-      setShowNotification(false)
-      
+      console.log('✅ [ChatButton] Chat abierto, marcando mensajes como leídos')
       markMessagesAsRead(serviceId, currentUserRole)
-        .then(() => console.log('✅ [ChatButton] Mensajes marcados como leídos'))
-        .catch(err => console.error('Error marcando leídos:', err))
+        .then(() => {
+          console.log('✅ [ChatButton] Mensajes marcados como leídos en Firebase')
+          lastUnreadRef.current = 0
+        })
+        .catch(err => console.error('❌ [ChatButton] Error marcando leídos:', err))
     }
   }, [chatOpen, serviceId, currentUserRole])
 
-  // Cerrar notificación automáticamente
-  useEffect(() => {
-    if (showNotification) {
-      const timer = setTimeout(() => setShowNotification(false), 4000)
-      return () => clearTimeout(timer)
-    }
-  }, [showNotification])
-
   // Handlers
   const handleOpenChat = () => {
+    console.log('👆 [ChatButton] Abriendo chat')
     setChatOpen(true)
-    setShowNotification(false)
     onChatOpen?.()
   }
 
   const handleCloseChat = () => {
+    console.log('👆 [ChatButton] Cerrando chat')
     setChatOpen(false)
     onChatClose?.()
   }
@@ -124,23 +157,28 @@ export default function ChatButton({
 
   const buttonColor = currentUserRole === 'restaurant' ? 'primary' : 'success'
 
-  // Variante icon
+  // Animación de pulso
+  const pulseAnimation = unreadCount > 0 ? {
+    animation: 'pulse 1.5s infinite',
+    '@keyframes pulse': {
+      '0%': { transform: 'scale(1)', opacity: 1 },
+      '50%': { transform: 'scale(1.15)', opacity: 0.9 },
+      '100%': { transform: 'scale(1)', opacity: 1 },
+    }
+  } : {}
+
+  // ============================================
+  // 📱 VARIANTE ICON (para usar dentro de listas)
+  // ============================================
   if (variant === 'icon') {
     return (
       <>
-        <Tooltip title={unreadCount > 0 ? `${unreadCount} mensajes` : 'Chat'}>
+        <Tooltip title={unreadCount > 0 ? `${unreadCount} mensajes sin leer` : 'Chat'}>
           <IconButton onClick={handleOpenChat} size={size}>
-            <Badge badgeContent={unreadCount} color="error">
-              <ChatIcon 
-                color={buttonColor} 
-                sx={{ 
-                  animation: unreadCount > 0 ? 'pulse 1.5s infinite' : 'none',
-                  '@keyframes pulse': {
-                    '0%': { transform: 'scale(1)', opacity: 1 },
-                    '50%': { transform: 'scale(1.2)', opacity: 0.8 },
-                    '100%': { transform: 'scale(1)', opacity: 1 },
-                  }
-                }} 
+            <Badge badgeContent={unreadCount > 0 ? unreadCount : 0} color="error">
+              <ChatIcon
+                color={buttonColor}
+                sx={pulseAnimation}
               />
             </Badge>
           </IconButton>
@@ -157,58 +195,11 @@ export default function ChatButton({
     )
   }
 
-  // Variante FAB por defecto
+  // ============================================
+  // 📱 VARIANTE FAB (botón flotante)
+  // ============================================
   return (
     <>
-      {/* Notificación flotante */}
-      {showNotification && unreadCount > 0 && !chatOpen && (
-        <Box
-          sx={{
-            position: 'fixed',
-            bottom: isMobile ? 160 : 120,
-            right: 24,
-            zIndex: 1200,
-            animation: 'slideInUp 0.3s ease-out',
-            '@keyframes slideInUp': {
-              '0%': { transform: 'translateY(20px)', opacity: 0 },
-              '100%': { transform: 'translateY(0)', opacity: 1 }
-            }
-          }}
-        >
-          <Box
-            sx={{
-              borderRadius: 3,
-              boxShadow: 4,
-              maxWidth: 280,
-              cursor: 'pointer',
-              bgcolor: buttonColor === 'primary' ? 'primary.main' : 'success.main',
-              color: 'white',
-              p: 2,
-            }}
-            onClick={handleOpenChat}
-          >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="subtitle2" fontWeight="bold">
-                💬 {otherParty?.name || 'Chat'}
-              </Typography>
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setShowNotification(false)
-                }}
-                sx={{ color: 'white', p: 0.5 }}
-              >
-                <CloseIcon fontSize="small" />
-              </IconButton>
-            </Box>
-            <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5 }}>
-              {lastMessagePreview.substring(0, 50)}{lastMessagePreview.length > 50 ? '...' : ''}
-            </Typography>
-          </Box>
-        </Box>
-      )}
-
       {/* FAB Button */}
       <Fab
         color={buttonColor}
@@ -218,25 +209,15 @@ export default function ChatButton({
           position: 'fixed',
           bottom: isMobile ? 80 : 24,
           right: 24,
-          zIndex: 1100
+          zIndex: 1100,
+          ...pulseAnimation
         }}
       >
-        <Badge 
-          // ✅ Lógica visual: Mostrar si hay sin leer O si hay alerta forzada
-          badgeContent={(unreadCount > 0 || forceShowPulse) ? Math.max(unreadCount, 1) : 0} 
+        <Badge
+          badgeContent={unreadCount > 0 ? unreadCount : 0}
           color="error"
         >
-          <ChatIcon 
-            sx={{ 
-              // ✅ Pulso si hay sin leer O si hay alerta forzada
-              animation: (unreadCount > 0 || forceShowPulse) ? 'pulse 1.5s infinite' : 'none',
-              '@keyframes pulse': {
-                '0%': { transform: 'scale(1)', opacity: 1 },
-                '50%': { transform: 'scale(1.15)', opacity: 0.9 },
-                '100%': { transform: 'scale(1)', opacity: 1 },
-              }
-            }} 
-          />
+          <ChatIcon />
         </Badge>
       </Fab>
 
